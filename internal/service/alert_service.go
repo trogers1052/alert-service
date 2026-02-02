@@ -166,15 +166,27 @@ func (s *AlertService) isQuietHours() bool {
 func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string {
 	data := event.Data
 
+	// Check if this is a scale-in (average down) signal
+	isScaleIn := s.isScaleInSignal(data)
+
 	// Signal emoji
 	var emoji string
+	var signalLabel string
 	switch data.Signal {
 	case models.SignalBuy:
-		emoji = "🟢"
+		if isScaleIn {
+			emoji = "📈"
+			signalLabel = "SCALE-IN"
+		} else {
+			emoji = "🟢"
+			signalLabel = "BUY"
+		}
 	case models.SignalSell:
 		emoji = "🔴"
+		signalLabel = "SELL"
 	case models.SignalWatch:
 		emoji = "👀"
+		signalLabel = "WATCH"
 	}
 
 	// Confidence bar
@@ -182,8 +194,13 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 	var sb strings.Builder
 
-	// Header
-	sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, data.Signal, data.Symbol))
+	// Header - different format for scale-in
+	if isScaleIn {
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString("➕ <i>Adding to existing position</i>\n\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, signalLabel, data.Symbol))
+	}
 
 	// Confidence
 	sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
@@ -209,10 +226,37 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		sb.WriteString("\n")
 	}
 
+	// Scale-in specific info
+	if isScaleIn {
+		sb.WriteString("⚠️ <b>Note:</b> This is an averaging down opportunity.\n")
+		sb.WriteString("Review your position size before adding.\n\n")
+	}
+
 	// Timestamp
 	sb.WriteString(fmt.Sprintf("🕐 %s", event.Timestamp.Format("2006-01-02 15:04:05 MST")))
 
 	return sb.String()
+}
+
+// isScaleInSignal checks if this is an average down / scale-in signal
+func (s *AlertService) isScaleInSignal(data *models.DecisionData) bool {
+	// Check if "Average Down" rule triggered
+	for _, rule := range data.RulesTriggered {
+		if strings.Contains(strings.ToLower(rule.RuleName), "average down") {
+			return true
+		}
+	}
+
+	// Check reasoning for scale-in keywords
+	reasoning := strings.ToLower(data.PrimaryReasoning)
+	scaleInKeywords := []string{"average down", "scale-in", "scale in", "adding to position"}
+	for _, keyword := range scaleInKeywords {
+		if strings.Contains(reasoning, keyword) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // formatRankingMessage formats a ranking event into a Telegram message
