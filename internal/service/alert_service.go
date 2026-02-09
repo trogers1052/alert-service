@@ -19,14 +19,18 @@ type AlertService struct {
 	telegramClient *telegram.Client
 	cooldowns      map[string]time.Time // symbol -> last alert time
 	cooldownMu     sync.RWMutex
+
+	rankingCooldowns   map[string]time.Time // signal type -> last ranking alert time
+	rankingCooldownMu  sync.RWMutex
 }
 
 // NewAlertService creates a new alert service
 func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *AlertService {
 	return &AlertService{
-		config:         cfg,
-		telegramClient: telegramClient,
-		cooldowns:      make(map[string]time.Time),
+		config:           cfg,
+		telegramClient:   telegramClient,
+		cooldowns:        make(map[string]time.Time),
+		rankingCooldowns: make(map[string]time.Time),
 	}
 }
 
@@ -89,6 +93,12 @@ func (s *AlertService) HandleRankingEvent(ctx context.Context, event interface{}
 		return nil
 	}
 
+	// Check cooldown for this signal type
+	if !s.checkRankingCooldown(ranking.Data.SignalType) {
+		log.Printf("Skipping ranking alert for %s: in cooldown period", ranking.Data.SignalType)
+		return nil
+	}
+
 	// Check quiet hours
 	if s.isQuietHours() {
 		log.Printf("Skipping ranking alert: quiet hours active")
@@ -100,6 +110,9 @@ func (s *AlertService) HandleRankingEvent(ctx context.Context, event interface{}
 	if err := s.telegramClient.SendMessage(ctx, message); err != nil {
 		return fmt.Errorf("failed to send telegram ranking message: %w", err)
 	}
+
+	// Update cooldown
+	s.setRankingCooldown(ranking.Data.SignalType)
 
 	log.Printf("Sent ranking alert for %s signals (%d symbols)",
 		ranking.Data.SignalType, len(ranking.Data.Rankings))
@@ -141,6 +154,27 @@ func (s *AlertService) setCooldown(symbol string) {
 	s.cooldownMu.Unlock()
 }
 
+// checkRankingCooldown returns true if we can send a ranking alert for this signal type
+func (s *AlertService) checkRankingCooldown(signalType string) bool {
+	s.rankingCooldownMu.RLock()
+	lastAlert, exists := s.rankingCooldowns[signalType]
+	s.rankingCooldownMu.RUnlock()
+
+	if !exists {
+		return true
+	}
+
+	cooldownDuration := time.Duration(s.config.RankingCooldownMinutes) * time.Minute
+	return time.Since(lastAlert) >= cooldownDuration
+}
+
+// setRankingCooldown updates the cooldown time for a ranking signal type
+func (s *AlertService) setRankingCooldown(signalType string) {
+	s.rankingCooldownMu.Lock()
+	s.rankingCooldowns[signalType] = time.Now()
+	s.rankingCooldownMu.Unlock()
+}
+
 // isQuietHours checks if current time is within quiet hours
 func (s *AlertService) isQuietHours() bool {
 	if !s.config.EnableQuietHours {
@@ -167,7 +201,7 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 	data := event.Data
 
 	// Check if this is a scale-in (average down) signal
-	isScaleIn := s.isScaleInSignal(data)
+	isScaleIn := s.isScaleInSignal(&data)
 
 	// Signal emoji
 	var emoji string
