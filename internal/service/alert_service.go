@@ -223,53 +223,142 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		signalLabel = "WATCH"
 	}
 
-	// Confidence bar
-	confidenceBar := s.formatConfidenceBar(data.Confidence)
-
 	var sb strings.Builder
 
-	// Header - different format for scale-in
-	if isScaleIn {
+	// Header with setup type if trade plan available
+	if data.TradePlan != nil {
+		setupType := s.formatSetupType(data.TradePlan.SetupType)
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString(fmt.Sprintf("Setup: %s  |  Confidence: %.0f%%\n\n", setupType, data.Confidence*100))
+	} else if isScaleIn {
 		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, data.Symbol))
 		sb.WriteString("➕ <i>Adding to existing position</i>\n\n")
 	} else {
+		confidenceBar := s.formatConfidenceBar(data.Confidence)
 		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
 	}
 
-	// Confidence
-	sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
+	// Trade Plan details (if available)
+	if data.TradePlan != nil {
+		tp := data.TradePlan
 
-	// Primary reasoning
-	sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", data.PrimaryReasoning))
+		// Entry zone
+		sb.WriteString(fmt.Sprintf("<b>Entry zone:</b>  $%.2f – $%.2f\n", tp.EntryZoneLow, tp.EntryZoneHigh))
 
-	// Rules triggered
-	if len(data.RulesTriggered) > 0 {
-		sb.WriteString("📋 <b>Rules Triggered:</b>\n")
-		for _, rule := range data.RulesTriggered {
-			sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", rule.RuleName, rule.Confidence*100))
+		// Stop loss
+		sb.WriteString(fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]\n",
+			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod)))
+
+		// Targets with R:R
+		sb.WriteString(fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]\n",
+			tp.Target1,
+			((tp.Target1-tp.EntryPrice)/tp.EntryPrice)*100,
+			tp.RiskRewardRatio))
+		sb.WriteString(fmt.Sprintf("<b>Target 2:</b>    $%.2f  (+%.1f%%)  [3:1 R:R]\n\n",
+			tp.Target2,
+			((tp.Target2-tp.EntryPrice)/tp.EntryPrice)*100))
+
+		// Position sizing
+		sb.WriteString(fmt.Sprintf("<b>%d shares</b>  |  $%.2f risk  (%.1f%% of account)\n",
+			tp.Shares, tp.DollarRisk, tp.RiskPct))
+		sb.WriteString(fmt.Sprintf("Invalidation: $%.2f\n", tp.InvalidationPrice))
+
+		// Valid until (parse and format nicely)
+		sb.WriteString(fmt.Sprintf("Valid until: %s\n\n", s.formatValidUntil(tp.ValidUntil)))
+
+		// R:R Warning if plan is not valid
+		if !tp.PlanValid && tp.RRWarning != nil {
+			sb.WriteString(fmt.Sprintf("⚠️ %s\n\n", *tp.RRWarning))
 		}
-		sb.WriteString("\n")
-	}
 
-	// Key indicators
-	if len(data.IndicatorsSnapshot) > 0 {
-		sb.WriteString("📈 <b>Key Indicators:</b>\n")
-		for name, value := range data.IndicatorsSnapshot {
-			sb.WriteString(fmt.Sprintf("  • %s: %.2f\n", name, value))
+		// Resistance note if present
+		if tp.ResistanceNote != nil {
+			sb.WriteString(fmt.Sprintf("📍 %s\n\n", *tp.ResistanceNote))
 		}
-		sb.WriteString("\n")
-	}
 
-	// Scale-in specific info
-	if isScaleIn {
-		sb.WriteString("⚠️ <b>Note:</b> This is an averaging down opportunity.\n")
-		sb.WriteString("Review your position size before adding.\n\n")
+		// Other warnings
+		if len(tp.Warnings) > 0 {
+			for _, w := range tp.Warnings {
+				sb.WriteString(fmt.Sprintf("⚠️ %s\n", w))
+			}
+			sb.WriteString("\n")
+		}
+	} else {
+		// Fallback to original format if no trade plan
+		// Primary reasoning
+		sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", data.PrimaryReasoning))
+
+		// Rules triggered
+		if len(data.RulesTriggered) > 0 {
+			sb.WriteString("📋 <b>Rules Triggered:</b>\n")
+			for _, rule := range data.RulesTriggered {
+				sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", rule.RuleName, rule.Confidence*100))
+			}
+			sb.WriteString("\n")
+		}
+
+		// Scale-in specific info
+		if isScaleIn {
+			sb.WriteString("⚠️ <b>Note:</b> This is an averaging down opportunity.\n")
+			sb.WriteString("Review your position size before adding.\n\n")
+		}
 	}
 
 	// Timestamp
 	sb.WriteString(fmt.Sprintf("🕐 %s", event.Timestamp.Format("2006-01-02 15:04:05 MST")))
 
 	return sb.String()
+}
+
+// formatSetupType converts setup_type to human-readable format
+func (s *AlertService) formatSetupType(setupType string) string {
+	switch setupType {
+	case "oversold_bounce":
+		return "Oversold Bounce"
+	case "pullback_to_support":
+		return "Pullback to Support"
+	case "breakout":
+		return "Breakout"
+	case "signal":
+		return "Signal"
+	default:
+		return setupType
+	}
+}
+
+// formatStopMethod converts stop method to display format
+func (s *AlertService) formatStopMethod(method string) string {
+	switch method {
+	case "atr_2x":
+		return "ATR×2"
+	case "percentage_4pct":
+		return "4%"
+	case "percentage_10pct":
+		return "10%"
+	default:
+		return method
+	}
+}
+
+// formatValidUntil parses ISO timestamp and returns friendly format
+func (s *AlertService) formatValidUntil(validUntil string) string {
+	t, err := time.Parse(time.RFC3339, validUntil)
+	if err != nil {
+		return validUntil
+	}
+
+	now := time.Now()
+	if t.Day() == now.Day() && t.Month() == now.Month() && t.Year() == now.Year() {
+		return "EOD"
+	}
+
+	diff := t.Sub(now)
+	if diff < 3*time.Hour {
+		return fmt.Sprintf("%.0f hours", diff.Hours())
+	}
+
+	return t.Format("Jan 2 15:04")
 }
 
 // isScaleInSignal checks if this is an average down / scale-in signal

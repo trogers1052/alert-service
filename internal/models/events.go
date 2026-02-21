@@ -20,6 +20,33 @@ type DecisionData struct {
 	RulesTriggered     []RuleResult           `json:"rules_triggered"`
 	IndicatorsSnapshot map[string]float64     `json:"indicators_snapshot"`
 	Metadata           map[string]interface{} `json:"metadata"`
+	TradePlan          *TradePlan             `json:"trade_plan,omitempty"`
+}
+
+// TradePlan contains entry/stop/target details for a trade
+type TradePlan struct {
+	SetupType        string   `json:"setup_type"`
+	RulesContributed []string `json:"rules_contributed"`
+	EntryPrice       float64  `json:"entry_price"`
+	EntryZoneLow     float64  `json:"entry_zone_low"`
+	EntryZoneHigh    float64  `json:"entry_zone_high"`
+	ValidUntil       string   `json:"valid_until"`
+	StopPrice        float64  `json:"stop_price"`
+	StopMethod       string   `json:"stop_method"`
+	StopPct          float64  `json:"stop_pct"`
+	Target1          float64  `json:"target_1"`
+	Target2          float64  `json:"target_2"`
+	SymbolTargetPct  *float64 `json:"symbol_target_pct,omitempty"`
+	ResistanceNote   *string  `json:"resistance_note,omitempty"`
+	RiskRewardRatio  float64  `json:"risk_reward_ratio"`
+	Shares           int      `json:"shares"`
+	DollarRisk       float64  `json:"dollar_risk"`
+	RiskPct          float64  `json:"risk_pct"`
+	PositionValue    float64  `json:"position_value"`
+	InvalidationPrice float64 `json:"invalidation_price"`
+	PlanValid        bool     `json:"plan_valid"`
+	RRWarning        *string  `json:"rr_warning,omitempty"`
+	Warnings         []string `json:"warnings"`
 }
 
 // RuleResult represents a single rule that was triggered
