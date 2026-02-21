@@ -175,14 +175,25 @@ func (s *AlertService) setRankingCooldown(signalType string) {
 	s.rankingCooldownMu.Unlock()
 }
 
-// isQuietHours checks if current time is within quiet hours
+// isQuietHours checks if current time is within quiet hours.
+//
+// The comparison is performed in the configured IANA timezone
+// (QUIET_HOURS_TIMEZONE, default "America/New_York") so that the quiet window
+// is always relative to the trader's local time, not the Pi server clock.
+// If the timezone string is invalid the function falls back to UTC and logs a
+// warning once — it never silently sends alerts during intended quiet hours.
 func (s *AlertService) isQuietHours() bool {
 	if !s.config.EnableQuietHours {
 		return false
 	}
 
-	now := time.Now()
-	hour := now.Hour()
+	loc, err := time.LoadLocation(s.config.QuietHoursTimezone)
+	if err != nil {
+		log.Printf("WARNING: invalid QUIET_HOURS_TIMEZONE %q: %v — falling back to UTC", s.config.QuietHoursTimezone, err)
+		loc = time.UTC
+	}
+
+	hour := time.Now().In(loc).Hour()
 
 	start := s.config.QuietHoursStart
 	end := s.config.QuietHoursEnd

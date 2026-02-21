@@ -28,9 +28,10 @@ type Config struct {
 	RankingsTopN           int  // Number of top stocks to include in ranking alerts
 	CooldownMinutes        int  // Cooldown between alerts for same symbol
 	RankingCooldownMinutes int  // Cooldown between ranking alerts for same signal type
-	QuietHoursStart   int     // Hour to start quiet hours (0-23)
-	QuietHoursEnd     int     // Hour to end quiet hours (0-23)
-	EnableQuietHours  bool    // Whether to enable quiet hours
+	QuietHoursStart    int    // Hour to start quiet hours (0-23), in QuietHoursTimezone
+	QuietHoursEnd      int    // Hour to end quiet hours (0-23), in QuietHoursTimezone
+	EnableQuietHours   bool   // Whether to enable quiet hours
+	QuietHoursTimezone string // IANA timezone name for quiet hours (e.g. "America/New_York")
 }
 
 // Load loads configuration from environment variables
@@ -55,9 +56,10 @@ func Load() (*Config, error) {
 		RankingsTopN:           getEnvInt("RANKINGS_TOP_N", 5),
 		CooldownMinutes:        getEnvInt("COOLDOWN_MINUTES", 30),
 		RankingCooldownMinutes: getEnvInt("RANKING_COOLDOWN_MINUTES", 60),
-		QuietHoursStart:  getEnvInt("QUIET_HOURS_START", 22), // 10 PM
-		QuietHoursEnd:    getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
-		EnableQuietHours: getEnvBool("ENABLE_QUIET_HOURS", false),
+		QuietHoursStart:    getEnvInt("QUIET_HOURS_START", 22), // 10 PM
+		QuietHoursEnd:      getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
+		EnableQuietHours:   getEnvBool("ENABLE_QUIET_HOURS", false),
+		QuietHoursTimezone: getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
 	}
 
 	// Validate required fields

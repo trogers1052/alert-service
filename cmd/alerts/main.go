@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,22 @@ import (
 
 func main() {
 	log.Println("Starting alert-service...")
+
+	// Health endpoint — Docker/systemd HEALTHCHECK target
+	healthPort := os.Getenv("HEALTH_PORT")
+	if healthPort == "" {
+		healthPort = "8080"
+	}
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok")) //nolint:errcheck
+	})
+	go func() {
+		if err := http.ListenAndServe(":"+healthPort, nil); err != nil {
+			log.Printf("Health server error: %v", err)
+		}
+	}()
+	log.Printf("Health endpoint: http://localhost:%s/health", healthPort)
 
 	// Load configuration
 	cfg, err := config.Load()
