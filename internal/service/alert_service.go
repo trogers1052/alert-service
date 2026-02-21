@@ -344,8 +344,60 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		}
 	}
 
+	// Pre-trade checklist (BUY signals only)
+	if data.Checklist != nil {
+		sb.WriteString(s.formatChecklist(data.Checklist))
+	}
+
 	// Timestamp
 	sb.WriteString(fmt.Sprintf("🕐 %s", event.Timestamp.Format("2006-01-02 15:04:05 MST")))
+
+	return sb.String()
+}
+
+// formatChecklist renders the pre-trade checklist as a Telegram section
+func (s *AlertService) formatChecklist(cl *models.Checklist) string {
+	var sb strings.Builder
+
+	// Status line
+	var statusEmoji string
+	switch cl.Status {
+	case "GO":
+		statusEmoji = "✅"
+	case "BLOCKED":
+		statusEmoji = "🚫"
+	default:
+		statusEmoji = "⚠️"
+	}
+	sb.WriteString(fmt.Sprintf("<b>Pre-Trade Checklist:</b> %s <b>%s</b>\n", statusEmoji, cl.Status))
+
+	checkMark := func(ok bool) string {
+		if ok {
+			return "✅"
+		}
+		return "❌"
+	}
+
+	sb.WriteString(fmt.Sprintf("  %s Stop loss defined\n", checkMark(cl.StopLossDefined)))
+	sb.WriteString(fmt.Sprintf("  %s Position sized ≤2%%  (%.1f%% risk)\n", checkMark(cl.PositionSizedCorrectly), cl.RiskPct))
+	sb.WriteString(fmt.Sprintf("  %s R:R ≥ 2:1  (%.1f:1)\n", checkMark(cl.RRRatioAcceptable), cl.RRRatio))
+
+	if cl.EarningsDate != nil {
+		verified := ""
+		if cl.EarningsVerified != nil && *cl.EarningsVerified {
+			verified = " ✓confirmed"
+		}
+		daysAway := 0
+		if cl.EarningsDaysAway != nil {
+			daysAway = *cl.EarningsDaysAway
+		}
+		sb.WriteString(fmt.Sprintf("  %s No earnings within 5 days  (%s, %dd%s)\n",
+			checkMark(cl.NoEarningsImminent), *cl.EarningsDate, daysAway, verified))
+	} else {
+		sb.WriteString(fmt.Sprintf("  %s No earnings within 5 days\n", checkMark(cl.NoEarningsImminent)))
+	}
+
+	sb.WriteString(fmt.Sprintf("  %s Regime compatible  (%s)\n\n", checkMark(cl.RegimeCompatible), cl.RegimeID))
 
 	return sb.String()
 }
