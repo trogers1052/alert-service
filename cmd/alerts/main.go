@@ -28,7 +28,13 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok")) //nolint:errcheck
 	})
-	healthServer := &http.Server{Addr: ":" + healthPort, Handler: healthMux}
+	healthServer := &http.Server{
+		Addr:              ":" + healthPort,
+		Handler:           healthMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+	}
 	go func() {
 		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Health server error: %v", err)
@@ -56,6 +62,7 @@ func main() {
 
 	// Create alert service
 	alertService := service.NewAlertService(cfg, telegramClient)
+	defer alertService.Close()
 
 	// Create Kafka consumer
 	consumer, err := kafka.NewConsumer(

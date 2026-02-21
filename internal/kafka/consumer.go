@@ -134,6 +134,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 					if err := h.consumer.decisionHandler(ctx, &event); err != nil {
 						log.Printf("Failed to handle decision event: %v", err)
+						continue
 					}
 				}
 
@@ -148,6 +149,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 					if err := h.consumer.rankingHandler(ctx, &event); err != nil {
 						log.Printf("Failed to handle ranking event: %v", err)
+						continue
 					}
 				}
 			}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"html"
 	"log"
 	"strings"
 	"sync"
@@ -22,6 +23,8 @@ type AlertService struct {
 
 	rankingCooldowns   map[string]time.Time // signal type -> last ranking alert time
 	rankingCooldownMu  sync.RWMutex
+
+	stopCleanup chan struct{}
 }
 
 // NewAlertService creates a new alert service
@@ -31,15 +34,26 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 		telegramClient:   telegramClient,
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
+		stopCleanup:      make(chan struct{}),
 	}
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			s.cleanupExpiredCooldowns()
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupExpiredCooldowns()
+			case <-s.stopCleanup:
+				return
+			}
 		}
 	}()
 	return s
+}
+
+// Close stops background goroutines
+func (s *AlertService) Close() {
+	close(s.stopCleanup)
 }
 
 func (s *AlertService) cleanupExpiredCooldowns() {
@@ -264,17 +278,19 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 	var sb strings.Builder
 
+	sym := html.EscapeString(data.Symbol)
+
 	// Header with setup type if trade plan available
 	if data.TradePlan != nil {
 		setupType := s.formatSetupType(data.TradePlan.SetupType)
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
 		sb.WriteString(fmt.Sprintf("Setup: %s  |  Confidence: %.0f%%\n\n", setupType, data.Confidence*100))
 	} else if isScaleIn {
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
 		sb.WriteString("➕ <i>Adding to existing position</i>\n\n")
 	} else {
 		confidenceBar := s.formatConfidenceBar(data.Confidence)
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, signalLabel, data.Symbol))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, signalLabel, sym))
 		sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
 	}
 
@@ -308,31 +324,31 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 		// R:R Warning if plan is not valid
 		if !tp.PlanValid && tp.RRWarning != nil {
-			sb.WriteString(fmt.Sprintf("⚠️ %s\n\n", *tp.RRWarning))
+			sb.WriteString(fmt.Sprintf("⚠️ %s\n\n", html.EscapeString(*tp.RRWarning)))
 		}
 
 		// Resistance note if present
 		if tp.ResistanceNote != nil {
-			sb.WriteString(fmt.Sprintf("📍 %s\n\n", *tp.ResistanceNote))
+			sb.WriteString(fmt.Sprintf("📍 %s\n\n", html.EscapeString(*tp.ResistanceNote)))
 		}
 
 		// Other warnings
 		if len(tp.Warnings) > 0 {
 			for _, w := range tp.Warnings {
-				sb.WriteString(fmt.Sprintf("⚠️ %s\n", w))
+				sb.WriteString(fmt.Sprintf("⚠️ %s\n", html.EscapeString(w)))
 			}
 			sb.WriteString("\n")
 		}
 	} else {
 		// Fallback to original format if no trade plan
 		// Primary reasoning
-		sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", data.PrimaryReasoning))
+		sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", html.EscapeString(data.PrimaryReasoning)))
 
 		// Rules triggered
 		if len(data.RulesTriggered) > 0 {
 			sb.WriteString("📋 <b>Rules Triggered:</b>\n")
 			for _, rule := range data.RulesTriggered {
-				sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", rule.RuleName, rule.Confidence*100))
+				sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", html.EscapeString(rule.RuleName), rule.Confidence*100))
 			}
 			sb.WriteString("\n")
 		}
@@ -369,7 +385,7 @@ func (s *AlertService) formatChecklist(cl *models.Checklist) string {
 	default:
 		statusEmoji = "⚠️"
 	}
-	sb.WriteString(fmt.Sprintf("<b>Pre-Trade Checklist:</b> %s <b>%s</b>\n", statusEmoji, cl.Status))
+	sb.WriteString(fmt.Sprintf("<b>Pre-Trade Checklist:</b> %s <b>%s</b>\n", statusEmoji, html.EscapeString(cl.Status)))
 
 	checkMark := func(ok bool) string {
 		if ok {
@@ -392,12 +408,12 @@ func (s *AlertService) formatChecklist(cl *models.Checklist) string {
 			daysAway = *cl.EarningsDaysAway
 		}
 		sb.WriteString(fmt.Sprintf("  %s No earnings within 5 days  (%s, %dd%s)\n",
-			checkMark(cl.NoEarningsImminent), *cl.EarningsDate, daysAway, verified))
+			checkMark(cl.NoEarningsImminent), html.EscapeString(*cl.EarningsDate), daysAway, verified))
 	} else {
 		sb.WriteString(fmt.Sprintf("  %s No earnings within 5 days\n", checkMark(cl.NoEarningsImminent)))
 	}
 
-	sb.WriteString(fmt.Sprintf("  %s Regime compatible  (%s)\n\n", checkMark(cl.RegimeCompatible), cl.RegimeID))
+	sb.WriteString(fmt.Sprintf("  %s Regime compatible  (%s)\n\n", checkMark(cl.RegimeCompatible), html.EscapeString(cl.RegimeID)))
 
 	return sb.String()
 }
@@ -414,7 +430,7 @@ func (s *AlertService) formatSetupType(setupType string) string {
 	case "signal":
 		return "Signal"
 	default:
-		return setupType
+		return html.EscapeString(setupType)
 	}
 }
 
@@ -428,7 +444,7 @@ func (s *AlertService) formatStopMethod(method string) string {
 	case "percentage_10pct":
 		return "10%"
 	default:
-		return method
+		return html.EscapeString(method)
 	}
 }
 
@@ -436,7 +452,7 @@ func (s *AlertService) formatStopMethod(method string) string {
 func (s *AlertService) formatValidUntil(validUntil string) string {
 	t, err := time.Parse(time.RFC3339, validUntil)
 	if err != nil {
-		return validUntil
+		return html.EscapeString(validUntil)
 	}
 
 	now := time.Now()
@@ -515,15 +531,14 @@ func (s *AlertService) formatRankingMessage(event *models.RankingEvent) string {
 		}
 
 		sb.WriteString(fmt.Sprintf("%s <b>%s</b> - Score: %.2f (%.0f%% confidence)\n",
-			medal, r.Symbol, r.Score, r.Confidence*100))
+			medal, html.EscapeString(r.Symbol), r.Score, r.Confidence*100))
 
 		if r.Reasoning != "" {
-			// Truncate long reasoning
 			reasoning := r.Reasoning
 			if len(reasoning) > 100 {
 				reasoning = reasoning[:97] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("    └ %s\n", reasoning))
+			sb.WriteString(fmt.Sprintf("    └ %s\n", html.EscapeString(reasoning)))
 		}
 		sb.WriteString("\n")
 	}
