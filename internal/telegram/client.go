@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -48,8 +49,30 @@ func (c *Client) SendMessage(ctx context.Context, message string) error {
 	return c.SendMessageWithParseMode(ctx, message, "HTML")
 }
 
-// SendMessageWithParseMode sends a message with a specific parse mode
+// SendMessageWithParseMode sends a message with a specific parse mode, with retry.
 func (c *Client) SendMessageWithParseMode(ctx context.Context, message, parseMode string) error {
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt*attempt) * time.Second // 1s, 4s
+			log.Printf("Telegram send attempt %d/%d failed, retrying in %s: %v", attempt, maxRetries, delay, lastErr)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		if err := c.doSend(ctx, message, parseMode); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("telegram send failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func (c *Client) doSend(ctx context.Context, message, parseMode string) error {
 	url := fmt.Sprintf(telegramAPIURL, c.botToken)
 
 	reqBody := SendMessageRequest{

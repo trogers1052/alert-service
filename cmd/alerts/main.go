@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/trogers1052/alert-service/internal/config"
 	"github.com/trogers1052/alert-service/internal/kafka"
@@ -22,12 +23,14 @@ func main() {
 	if healthPort == "" {
 		healthPort = "8080"
 	}
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok")) //nolint:errcheck
 	})
+	healthServer := &http.Server{Addr: ":" + healthPort, Handler: healthMux}
 	go func() {
-		if err := http.ListenAndServe(":"+healthPort, nil); err != nil {
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Health server error: %v", err)
 		}
 	}()
@@ -93,10 +96,12 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down alert-service...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	healthServer.Shutdown(shutdownCtx) //nolint:errcheck
 	cancel()
 
 	// Send shutdown notification
-	shutdownCtx := context.Background()
 	shutdownMsg := "🛑 <b>Alert Service Stopped</b>"
 	if err := telegramClient.SendMessage(shutdownCtx, shutdownMsg); err != nil {
 		log.Printf("Warning: failed to send shutdown notification: %v", err)

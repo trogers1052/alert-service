@@ -26,12 +26,40 @@ type AlertService struct {
 
 // NewAlertService creates a new alert service
 func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *AlertService {
-	return &AlertService{
+	s := &AlertService{
 		config:           cfg,
 		telegramClient:   telegramClient,
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 	}
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.cleanupExpiredCooldowns()
+		}
+	}()
+	return s
+}
+
+func (s *AlertService) cleanupExpiredCooldowns() {
+	cutoff := time.Now().Add(-time.Duration(s.config.CooldownMinutes*2) * time.Minute)
+
+	s.cooldownMu.Lock()
+	for key, t := range s.cooldowns {
+		if t.Before(cutoff) {
+			delete(s.cooldowns, key)
+		}
+	}
+	s.cooldownMu.Unlock()
+
+	s.rankingCooldownMu.Lock()
+	for key, t := range s.rankingCooldowns {
+		if t.Before(cutoff) {
+			delete(s.rankingCooldowns, key)
+		}
+	}
+	s.rankingCooldownMu.Unlock()
 }
 
 // HandleDecisionEvent processes a decision event and sends alerts if appropriate
