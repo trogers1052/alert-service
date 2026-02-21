@@ -5,9 +5,18 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/trogers1052/alert-service/internal/models"
+)
+
+const (
+	// handlerMaxRetries is the number of times to retry a failed handler before
+	// giving up and committing the offset.  Trading alerts are high-value so we
+	// retry a few times to ride out transient Telegram failures.
+	handlerMaxRetries = 3
+	handlerRetryDelay = 2 * time.Second
 )
 
 // MessageHandler is called when a message is received
@@ -138,9 +147,25 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 						continue
 					}
 
-					if err := h.consumer.decisionHandler(ctx, &event); err != nil {
-						log.Printf("Failed to handle decision event: %v", err)
-						continue
+					// Retry handler failures — trading alerts are high-value
+					// and transient Telegram errors should not silently drop them.
+					var handlerErr error
+					for attempt := 1; attempt <= handlerMaxRetries; attempt++ {
+						handlerErr = h.consumer.decisionHandler(ctx, &event)
+						if handlerErr == nil {
+							break
+						}
+						if attempt < handlerMaxRetries {
+							log.Printf("Decision handler attempt %d/%d failed for %s: %v — retrying in %s",
+								attempt, handlerMaxRetries, event.Data.Symbol, handlerErr, handlerRetryDelay)
+							time.Sleep(handlerRetryDelay)
+						}
+					}
+					if handlerErr != nil {
+						log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — alert may be lost",
+							handlerMaxRetries, event.Data.Symbol, message.Offset, handlerErr)
+						// Mark the message to avoid stalling the consumer, but
+						// the CRITICAL log ensures visibility that an alert was dropped.
 					}
 				}
 
@@ -155,7 +180,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 					if err := h.consumer.rankingHandler(ctx, &event); err != nil {
 						log.Printf("Failed to handle ranking event: %v", err)
-						continue
+						// Rankings are lower priority — log and move on
 					}
 				}
 			}

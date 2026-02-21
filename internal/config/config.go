@@ -26,8 +26,9 @@ type Config struct {
 	AlertOnWatch      bool    // Send alerts for WATCH signals
 	AlertOnRankings        bool // Send daily ranking summaries
 	RankingsTopN           int  // Number of top stocks to include in ranking alerts
-	CooldownMinutes        int  // Cooldown between alerts for same symbol
-	RankingCooldownMinutes int  // Cooldown between ranking alerts for same signal type
+	CooldownMinutes          int // Cooldown between alerts for same symbol
+	ScaleInCooldownMinutes   int // Shorter cooldown for scale-in signals
+	RankingCooldownMinutes   int // Cooldown between ranking alerts for same signal type
 	QuietHoursStart    int    // Hour to start quiet hours (0-23), in QuietHoursTimezone
 	QuietHoursEnd      int    // Hour to end quiet hours (0-23), in QuietHoursTimezone
 	EnableQuietHours   bool   // Whether to enable quiet hours
@@ -55,6 +56,7 @@ func Load() (*Config, error) {
 		AlertOnRankings:  getEnvBool("ALERT_ON_RANKINGS", true),
 		RankingsTopN:           getEnvInt("RANKINGS_TOP_N", 5),
 		CooldownMinutes:        getEnvInt("COOLDOWN_MINUTES", 30),
+		ScaleInCooldownMinutes: getEnvInt("SCALE_IN_COOLDOWN_MINUTES", 5),
 		RankingCooldownMinutes: getEnvInt("RANKING_COOLDOWN_MINUTES", 60),
 		QuietHoursStart:    getEnvInt("QUIET_HOURS_START", 22), // 10 PM
 		QuietHoursEnd:      getEnvInt("QUIET_HOURS_END", 7),    // 7 AM

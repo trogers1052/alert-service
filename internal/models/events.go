@@ -152,3 +152,17 @@ const (
 	SignalSell  = "SELL"
 	SignalWatch = "WATCH"
 )
+
+// FeedbackAction represents user response to an alert
+const (
+	FeedbackTraded = "traded"
+	FeedbackSkipped = "skipped"
+)
+
+// FeedbackEntry records whether the user acted on a signal
+type FeedbackEntry struct {
+	Symbol    string    `json:"symbol"`
+	Signal    string    `json:"signal"`
+	Action    string    `json:"action"` // "traded" or "skipped"
+	Timestamp time.Time `json:"timestamp"`
+}

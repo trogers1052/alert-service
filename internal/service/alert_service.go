@@ -24,7 +24,12 @@ type AlertService struct {
 	rankingCooldowns   map[string]time.Time // signal type -> last ranking alert time
 	rankingCooldownMu  sync.RWMutex
 
-	stopCleanup chan struct{}
+	// Feedback tracking — records whether user acted on signals
+	feedbackLog map[string]models.FeedbackEntry
+	feedbackMu  sync.RWMutex
+
+	stopCleanup    chan struct{}
+	stopFeedback   chan struct{}
 }
 
 // NewAlertService creates a new alert service
@@ -34,7 +39,9 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 		telegramClient:   telegramClient,
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
+		feedbackLog:      make(map[string]models.FeedbackEntry),
 		stopCleanup:      make(chan struct{}),
+		stopFeedback:     make(chan struct{}),
 	}
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -48,12 +55,15 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 			}
 		}
 	}()
+	// Start polling for Telegram callback queries (feedback buttons)
+	go s.pollFeedbackCallbacks()
 	return s
 }
 
 // Close stops background goroutines
 func (s *AlertService) Close() {
 	close(s.stopCleanup)
+	close(s.stopFeedback)
 }
 
 func (s *AlertService) cleanupExpiredCooldowns() {
@@ -98,10 +108,23 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		return nil
 	}
 
-	// Check cooldown
-	if !s.checkCooldown(data.Symbol) {
-		log.Printf("Skipping alert for %s: in cooldown period", data.Symbol)
-		return nil
+	// Check cooldown — keyed on symbol:signal so a BUY cooldown doesn't
+	// suppress a subsequent SELL alert for the same symbol.
+	// Scale-in signals use a shorter cooldown so position-add opportunities
+	// aren't silently swallowed.
+	cooldownKey := data.Symbol + ":" + data.Signal
+	isScaleIn := s.isScaleInSignal(&data)
+	if isScaleIn {
+		scaleInDuration := time.Duration(s.config.ScaleInCooldownMinutes) * time.Minute
+		if !s.checkCooldownWithDuration(cooldownKey, scaleInDuration) {
+			log.Printf("Skipping scale-in alert for %s %s: in scale-in cooldown period", data.Symbol, data.Signal)
+			return nil
+		}
+	} else {
+		if !s.checkCooldown(cooldownKey) {
+			log.Printf("Skipping alert for %s %s: in cooldown period", data.Symbol, data.Signal)
+			return nil
+		}
 	}
 
 	// Check quiet hours
@@ -110,14 +133,30 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		return nil
 	}
 
-	// Format and send the message
+	// Format and send the message with feedback buttons for BUY/SELL signals
 	message := s.formatDecisionMessage(decision)
-	if err := s.telegramClient.SendMessage(ctx, message); err != nil {
-		return fmt.Errorf("failed to send telegram message: %w", err)
+
+	if data.Signal == models.SignalBuy || data.Signal == models.SignalSell {
+		ts := time.Now().Format("150405") // compact timestamp for callback data
+		keyboard := &telegram.InlineKeyboardMarkup{
+			InlineKeyboard: [][]telegram.InlineKeyboardButton{
+				{
+					{Text: "✅ Traded", CallbackData: fmt.Sprintf("fb:%s:%s:%s:traded", data.Symbol, data.Signal, ts)},
+					{Text: "❌ Skipped", CallbackData: fmt.Sprintf("fb:%s:%s:%s:skipped", data.Symbol, data.Signal, ts)},
+				},
+			},
+		}
+		if _, err := s.telegramClient.SendMessageWithKeyboard(ctx, message, keyboard); err != nil {
+			return fmt.Errorf("failed to send telegram message: %w", err)
+		}
+	} else {
+		if err := s.telegramClient.SendMessage(ctx, message); err != nil {
+			return fmt.Errorf("failed to send telegram message: %w", err)
+		}
 	}
 
 	// Update cooldown
-	s.setCooldown(data.Symbol)
+	s.setCooldown(cooldownKey)
 
 	log.Printf("Sent alert for %s %s signal (confidence: %.2f)", data.Symbol, data.Signal, data.Confidence)
 	return nil
@@ -175,18 +214,22 @@ func (s *AlertService) shouldAlertForSignal(signal string) bool {
 	}
 }
 
-// checkCooldown returns true if we can send an alert for this symbol
-func (s *AlertService) checkCooldown(symbol string) bool {
+// checkCooldown returns true if we can send an alert for this key using the default cooldown
+func (s *AlertService) checkCooldown(key string) bool {
+	return s.checkCooldownWithDuration(key, time.Duration(s.config.CooldownMinutes)*time.Minute)
+}
+
+// checkCooldownWithDuration returns true if enough time has passed since the last alert for this key
+func (s *AlertService) checkCooldownWithDuration(key string, duration time.Duration) bool {
 	s.cooldownMu.RLock()
-	lastAlert, exists := s.cooldowns[symbol]
+	lastAlert, exists := s.cooldowns[key]
 	s.cooldownMu.RUnlock()
 
 	if !exists {
 		return true
 	}
 
-	cooldownDuration := time.Duration(s.config.CooldownMinutes) * time.Minute
-	return time.Since(lastAlert) >= cooldownDuration
+	return time.Since(lastAlert) >= duration
 }
 
 // setCooldown updates the cooldown time for a symbol
@@ -554,4 +597,83 @@ func (s *AlertService) formatConfidenceBar(confidence float64) string {
 	empty := 10 - filled
 
 	return strings.Repeat("█", filled) + strings.Repeat("░", empty)
+}
+
+// pollFeedbackCallbacks long-polls Telegram for callback query responses
+// (user pressing ✅ Traded or ❌ Skipped on alert messages)
+func (s *AlertService) pollFeedbackCallbacks() {
+	var offset int64
+	ctx := context.Background()
+
+	for {
+		select {
+		case <-s.stopFeedback:
+			return
+		default:
+		}
+
+		updates, err := s.telegramClient.GetUpdates(ctx, offset)
+		if err != nil {
+			log.Printf("Feedback poll error: %v", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		for _, update := range updates {
+			offset = update.UpdateID + 1
+
+			if update.CallbackQuery == nil {
+				continue
+			}
+
+			cb := update.CallbackQuery
+			s.handleFeedbackCallback(ctx, cb)
+		}
+	}
+}
+
+// handleFeedbackCallback processes a single callback query from a feedback button press
+func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.CallbackQuery) {
+	// Parse callback data: "fb:{symbol}:{signal}:{ts}:{action}"
+	parts := strings.Split(cb.Data, ":")
+	if len(parts) != 5 || parts[0] != "fb" {
+		return
+	}
+
+	symbol := parts[1]
+	signal := parts[2]
+	action := parts[4] // "traded" or "skipped"
+
+	entry := models.FeedbackEntry{
+		Symbol:    symbol,
+		Signal:    signal,
+		Action:    action,
+		Timestamp: time.Now(),
+	}
+
+	// Store feedback
+	feedbackKey := fmt.Sprintf("%s:%s:%s", symbol, signal, parts[3])
+	s.feedbackMu.Lock()
+	s.feedbackLog[feedbackKey] = entry
+	s.feedbackMu.Unlock()
+
+	log.Printf("FEEDBACK: %s %s → %s", symbol, signal, action)
+
+	// Acknowledge the button press
+	ackText := fmt.Sprintf("Recorded: %s %s", symbol, action)
+	if err := s.telegramClient.AnswerCallbackQuery(ctx, cb.ID, ackText); err != nil {
+		log.Printf("Failed to answer callback query: %v", err)
+	}
+}
+
+// GetFeedbackLog returns a copy of the current feedback log (for reporting)
+func (s *AlertService) GetFeedbackLog() map[string]models.FeedbackEntry {
+	s.feedbackMu.RLock()
+	defer s.feedbackMu.RUnlock()
+
+	result := make(map[string]models.FeedbackEntry, len(s.feedbackLog))
+	for k, v := range s.feedbackLog {
+		result[k] = v
+	}
+	return result
 }
