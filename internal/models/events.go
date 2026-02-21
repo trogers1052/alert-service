@@ -1,6 +1,19 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// ValidSignalTypes contains the set of accepted signal type values.
+var ValidSignalTypes = map[string]bool{
+	SignalBuy:   true,
+	SignalSell:  true,
+	SignalWatch: true,
+}
+
+// MaxSymbolLength is the maximum allowed length for a ticker symbol.
+const MaxSymbolLength = 10
 
 // DecisionEvent represents a trading decision from the decision-engine
 type DecisionEvent struct {
@@ -22,6 +35,36 @@ type DecisionData struct {
 	Metadata           map[string]interface{} `json:"metadata"`
 	TradePlan          *TradePlan             `json:"trade_plan,omitempty"`
 	Checklist          *Checklist             `json:"checklist,omitempty"`
+}
+
+// Validate checks that all required fields in a DecisionEvent are present and
+// within acceptable ranges. It returns a descriptive error for the first
+// violation found, or nil when the message is well-formed.
+func (e *DecisionEvent) Validate() error {
+	d := e.Data
+
+	// Symbol: required, non-empty, max 10 characters
+	if d.Symbol == "" {
+		return fmt.Errorf("missing required field: symbol")
+	}
+	if len(d.Symbol) > MaxSymbolLength {
+		return fmt.Errorf("symbol %q exceeds max length of %d characters", d.Symbol, MaxSymbolLength)
+	}
+
+	// Signal (signal_type): must be one of the known values
+	if d.Signal == "" {
+		return fmt.Errorf("missing required field: signal_type")
+	}
+	if !ValidSignalTypes[d.Signal] {
+		return fmt.Errorf("invalid signal_type %q: expected one of BUY, SELL, WATCH", d.Signal)
+	}
+
+	// Confidence: must be in [0, 1]
+	if d.Confidence < 0 || d.Confidence > 1 {
+		return fmt.Errorf("confidence %.4f out of range [0, 1]", d.Confidence)
+	}
+
+	return nil
 }
 
 // Checklist holds the pre-trade checklist evaluation result

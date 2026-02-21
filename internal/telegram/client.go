@@ -119,3 +119,9 @@ func (c *Client) doSend(ctx context.Context, message, parseMode string) error {
 func (c *Client) SendMarkdownMessage(ctx context.Context, message string) error {
 	return c.SendMessageWithParseMode(ctx, message, "MarkdownV2")
 }
+
+// Close releases resources held by the Telegram client (e.g. idle HTTP
+// connections). It is safe to call multiple times.
+func (c *Client) Close() {
+	c.httpClient.CloseIdleConnections()
+}

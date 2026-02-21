@@ -127,7 +127,13 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 				if h.consumer.decisionHandler != nil {
 					var event models.DecisionEvent
 					if err := json.Unmarshal(message.Value, &event); err != nil {
-						log.Printf("Failed to unmarshal decision event: %v", err)
+						log.Printf("WARNING: Failed to unmarshal decision event (offset %d): %v", message.Offset, err)
+						session.MarkMessage(message, "")
+						continue
+					}
+
+					if err := event.Validate(); err != nil {
+						log.Printf("WARNING: Rejecting malformed decision event (offset %d): %v", message.Offset, err)
 						session.MarkMessage(message, "")
 						continue
 					}
