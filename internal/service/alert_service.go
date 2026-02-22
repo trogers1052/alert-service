@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/trogers1052/alert-service/internal/client"
 	"github.com/trogers1052/alert-service/internal/config"
 	"github.com/trogers1052/alert-service/internal/models"
 	"github.com/trogers1052/alert-service/internal/telegram"
@@ -25,8 +26,9 @@ type AlertService struct {
 	rankingCooldownMu  sync.RWMutex
 
 	// Feedback tracking — records whether user acted on signals
-	feedbackLog map[string]models.FeedbackEntry
-	feedbackMu  sync.RWMutex
+	feedbackLog   map[string]models.FeedbackEntry
+	feedbackMu    sync.RWMutex
+	stockClient   *client.StockServiceClient    // PostgreSQL persistence via stock-service (nil if unavailable)
 
 	stopCleanup    chan struct{}
 	stopFeedback   chan struct{}
@@ -40,6 +42,7 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
+		stockClient:      client.NewStockServiceClient(cfg.StockServiceURL),
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 	}
@@ -60,7 +63,7 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 	return s
 }
 
-// Close stops background goroutines
+// Close stops background goroutines and releases resources
 func (s *AlertService) Close() {
 	close(s.stopCleanup)
 	close(s.stopFeedback)
@@ -651,11 +654,16 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 		Timestamp: time.Now(),
 	}
 
-	// Store feedback
+	// Store feedback in-memory
 	feedbackKey := fmt.Sprintf("%s:%s:%s", symbol, signal, parts[3])
 	s.feedbackMu.Lock()
 	s.feedbackLog[feedbackKey] = entry
 	s.feedbackMu.Unlock()
+
+	// Persist to PostgreSQL via stock-service (best-effort)
+	if s.stockClient != nil {
+		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0)
+	}
 
 	log.Printf("FEEDBACK: %s %s → %s", symbol, signal, action)
 

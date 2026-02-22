@@ -33,6 +33,9 @@ type Config struct {
 	QuietHoursEnd      int    // Hour to end quiet hours (0-23), in QuietHoursTimezone
 	EnableQuietHours   bool   // Whether to enable quiet hours
 	QuietHoursTimezone string // IANA timezone name for quiet hours (e.g. "America/New_York")
+
+	// Stock-service — used for persisting feedback entries to PostgreSQL
+	StockServiceURL string
 }
 
 // Load loads configuration from environment variables
@@ -62,6 +65,9 @@ func Load() (*Config, error) {
 		QuietHoursEnd:      getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
 		EnableQuietHours:   getEnvBool("ENABLE_QUIET_HOURS", false),
 		QuietHoursTimezone: getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
+
+		// Stock-service
+		StockServiceURL: getEnv("STOCK_SERVICE_URL", "http://stock-service:8081"),
 	}
 
 	// Validate required fields
