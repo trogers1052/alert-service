@@ -111,6 +111,19 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		return nil
 	}
 
+	// Check minimum R:R ratio for BUY signals
+	if data.Signal == models.SignalBuy && s.config.MinRRRatio > 0 {
+		if data.TradePlan != nil && data.TradePlan.RiskRewardRatio < s.config.MinRRRatio {
+			log.Printf("Skipping alert for %s: R:R %.1f:1 below minimum %.1f:1",
+				data.Symbol, data.TradePlan.RiskRewardRatio, s.config.MinRRRatio)
+			return nil
+		}
+		if data.Checklist != nil && data.Checklist.Status == "BLOCKED" {
+			log.Printf("Skipping alert for %s: checklist status BLOCKED", data.Symbol)
+			return nil
+		}
+	}
+
 	// Check cooldown — keyed on symbol:signal so a BUY cooldown doesn't
 	// suppress a subsequent SELL alert for the same symbol.
 	// Scale-in signals use a shorter cooldown so position-add opportunities

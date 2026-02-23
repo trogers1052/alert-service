@@ -291,6 +291,13 @@ func (c *Client) SendMarkdownMessage(ctx context.Context, message string) error 
 	return c.SendMessageWithParseMode(ctx, message, "MarkdownV2")
 }
 
+// SetHTTPClientForTest allows tests to inject a custom HTTP client (e.g. one
+// that routes requests to an httptest.Server). This is not intended for
+// production use.
+func (c *Client) SetHTTPClientForTest(hc *http.Client) {
+	c.httpClient = hc
+}
+
 // Close releases resources held by the Telegram client (e.g. idle HTTP
 // connections). It is safe to call multiple times.
 func (c *Client) Close() {
