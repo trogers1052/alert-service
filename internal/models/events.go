@@ -99,6 +99,14 @@ type TradePlan struct {
 	Target2          float64  `json:"target_2"`
 	SymbolTargetPct  *float64 `json:"symbol_target_pct,omitempty"`
 	ResistanceNote   *string  `json:"resistance_note,omitempty"`
+
+	// Target context — probability, timeframe, and price positioning
+	Target1Probability *float64 `json:"target_1_probability,omitempty"`
+	Target1EstDays     *int     `json:"target_1_est_days,omitempty"`
+	Target2Probability *float64 `json:"target_2_probability,omitempty"`
+	Target2EstDays     *int     `json:"target_2_est_days,omitempty"`
+	PriceContext       *string  `json:"price_context,omitempty"`
+
 	RiskRewardRatio  float64  `json:"risk_reward_ratio"`
 	Shares           int      `json:"shares"`
 	DollarRisk       float64  `json:"dollar_risk"`

@@ -528,6 +528,55 @@ func TestFormatDecisionMessage_BuyWithTradePlan(t *testing.T) {
 	assert.Contains(t, msg, "$46.50") // invalidation
 }
 
+func TestFormatDecisionMessage_BuyWithTargetContext(t *testing.T) {
+	s, srv := newTestService(t)
+	defer srv.Close()
+
+	t1Prob := 0.45
+	t1Days := 8
+	t2Prob := 0.28
+	t2Days := 14
+	priceCtx := "At SMA20 support. Full trend alignment (bullish)"
+
+	event := makeDecisionEvent("CCJ", models.SignalBuy, 0.82)
+	event.Data.TradePlan = &models.TradePlan{
+		SetupType:          "pullback_to_support",
+		EntryPrice:         45.00,
+		EntryZoneLow:       44.50,
+		EntryZoneHigh:      45.50,
+		StopPrice:          43.00,
+		StopMethod:         "atr_2x",
+		StopPct:            4.4,
+		Target1:            49.00,
+		Target2:            51.00,
+		RiskRewardRatio:    2.0,
+		Shares:             7,
+		DollarRisk:         14.00,
+		RiskPct:            1.6,
+		PositionValue:      315.00,
+		InvalidationPrice:  42.50,
+		PlanValid:          true,
+		ValidUntil:         time.Now().Add(48 * time.Hour).Format(time.RFC3339),
+		Target1Probability: &t1Prob,
+		Target1EstDays:     &t1Days,
+		Target2Probability: &t2Prob,
+		Target2EstDays:     &t2Days,
+		PriceContext:       &priceCtx,
+	}
+
+	msg := s.formatDecisionMessage(event)
+
+	// Price context shown
+	assert.Contains(t, msg, "At SMA20 support")
+	assert.Contains(t, msg, "Full trend alignment")
+
+	// Probability and timeframe on targets
+	assert.Contains(t, msg, "~45%")
+	assert.Contains(t, msg, "~8d")
+	assert.Contains(t, msg, "~28%")
+	assert.Contains(t, msg, "~14d")
+}
+
 func TestFormatDecisionMessage_BuyWithoutTradePlan(t *testing.T) {
 	s, srv := newTestService(t)
 	defer srv.Close()

@@ -393,17 +393,34 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 		sb.WriteString("\n")
 
+		// Price context (where is price sitting?)
+		if tp.PriceContext != nil && *tp.PriceContext != "" {
+			sb.WriteString(fmt.Sprintf("📊 %s\n\n", html.EscapeString(*tp.PriceContext)))
+		}
+
 		// Entry zone, stop, targets
 		sb.WriteString(fmt.Sprintf("<b>Entry zone:</b>  $%.2f – $%.2f\n", tp.EntryZoneLow, tp.EntryZoneHigh))
 		sb.WriteString(fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]\n",
 			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod)))
-		sb.WriteString(fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]\n",
+
+		// Target 1 with probability and timeframe
+		t1Line := fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]",
 			tp.Target1,
 			((tp.Target1-tp.EntryPrice)/tp.EntryPrice)*100,
-			tp.RiskRewardRatio))
-		sb.WriteString(fmt.Sprintf("<b>Target 2:</b>    $%.2f  (+%.1f%%)  [3:1 R:R]\n\n",
+			tp.RiskRewardRatio)
+		if tp.Target1Probability != nil && tp.Target1EstDays != nil {
+			t1Line += fmt.Sprintf("  ~%d%% / ~%dd", int(*tp.Target1Probability*100), *tp.Target1EstDays)
+		}
+		sb.WriteString(t1Line + "\n")
+
+		// Target 2 with probability and timeframe
+		t2Line := fmt.Sprintf("<b>Target 2:</b>    $%.2f  (+%.1f%%)  [3:1 R:R]",
 			tp.Target2,
-			((tp.Target2-tp.EntryPrice)/tp.EntryPrice)*100))
+			((tp.Target2-tp.EntryPrice)/tp.EntryPrice)*100)
+		if tp.Target2Probability != nil && tp.Target2EstDays != nil {
+			t2Line += fmt.Sprintf("  ~%d%% / ~%dd", int(*tp.Target2Probability*100), *tp.Target2EstDays)
+		}
+		sb.WriteString(t2Line + "\n\n")
 	} else {
 		// Scale-in specific info
 		if isScaleIn {
