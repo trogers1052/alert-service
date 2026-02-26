@@ -339,11 +339,10 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 	sym := html.EscapeString(data.Symbol)
 
-	// Header with setup type if trade plan available
+	// Header
 	if data.TradePlan != nil {
-		setupType := s.formatSetupType(data.TradePlan.SetupType)
 		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
-		sb.WriteString(fmt.Sprintf("Setup: %s  |  Confidence: %.0f%%\n\n", setupType, data.Confidence*100))
+		sb.WriteString(fmt.Sprintf("Confidence: %.0f%%\n\n", data.Confidence*100))
 	} else if isScaleIn {
 		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
 		sb.WriteString("➕ <i>Adding to existing position</i>\n\n")
@@ -353,42 +352,31 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
 	}
 
+	// Reason and rules (always shown — the "why" behind the signal)
+	if data.PrimaryReasoning != "" {
+		sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", html.EscapeString(data.PrimaryReasoning)))
+	}
+	if len(data.RulesTriggered) > 0 {
+		sb.WriteString("📋 <b>Rules Triggered:</b>\n")
+		for _, rule := range data.RulesTriggered {
+			sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", html.EscapeString(rule.RuleName), rule.Confidence*100))
+		}
+		sb.WriteString("\n")
+	}
+
 	// Trade Plan details (if available)
 	if data.TradePlan != nil {
 		tp := data.TradePlan
-
-		// Entry zone
-		sb.WriteString(fmt.Sprintf("<b>Entry zone:</b>  $%.2f – $%.2f\n", tp.EntryZoneLow, tp.EntryZoneHigh))
-
-		// Stop loss
-		sb.WriteString(fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]\n",
-			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod)))
-
-		// Targets with R:R
-		sb.WriteString(fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]\n",
-			tp.Target1,
-			((tp.Target1-tp.EntryPrice)/tp.EntryPrice)*100,
-			tp.RiskRewardRatio))
-		sb.WriteString(fmt.Sprintf("<b>Target 2:</b>    $%.2f  (+%.1f%%)  [3:1 R:R]\n\n",
-			tp.Target2,
-			((tp.Target2-tp.EntryPrice)/tp.EntryPrice)*100))
 
 		// Position sizing
 		sb.WriteString(fmt.Sprintf("<b>%d shares</b>  |  $%.2f risk  (%.1f%% of account)\n",
 			tp.Shares, tp.DollarRisk, tp.RiskPct))
 		sb.WriteString(fmt.Sprintf("Invalidation: $%.2f\n", tp.InvalidationPrice))
-
-		// Valid until (parse and format nicely)
-		sb.WriteString(fmt.Sprintf("Valid until: %s\n\n", s.formatValidUntil(tp.ValidUntil)))
-
-		// R:R Warning if plan is not valid
-		if !tp.PlanValid && tp.RRWarning != nil {
-			sb.WriteString(fmt.Sprintf("⚠️ %s\n\n", html.EscapeString(*tp.RRWarning)))
-		}
+		sb.WriteString(fmt.Sprintf("Valid until: %s\n", s.formatValidUntil(tp.ValidUntil)))
 
 		// Resistance note if present
 		if tp.ResistanceNote != nil {
-			sb.WriteString(fmt.Sprintf("📍 %s\n\n", html.EscapeString(*tp.ResistanceNote)))
+			sb.WriteString(fmt.Sprintf("📍 %s\n", html.EscapeString(*tp.ResistanceNote)))
 		}
 
 		// Other warnings
@@ -396,22 +384,27 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 			for _, w := range tp.Warnings {
 				sb.WriteString(fmt.Sprintf("⚠️ %s\n", html.EscapeString(w)))
 			}
-			sb.WriteString("\n")
 		}
+
+		// R:R Warning if plan is not valid
+		if !tp.PlanValid && tp.RRWarning != nil {
+			sb.WriteString(fmt.Sprintf("⚠️ %s\n", html.EscapeString(*tp.RRWarning)))
+		}
+
+		sb.WriteString("\n")
+
+		// Entry zone, stop, targets
+		sb.WriteString(fmt.Sprintf("<b>Entry zone:</b>  $%.2f – $%.2f\n", tp.EntryZoneLow, tp.EntryZoneHigh))
+		sb.WriteString(fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]\n",
+			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod)))
+		sb.WriteString(fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]\n",
+			tp.Target1,
+			((tp.Target1-tp.EntryPrice)/tp.EntryPrice)*100,
+			tp.RiskRewardRatio))
+		sb.WriteString(fmt.Sprintf("<b>Target 2:</b>    $%.2f  (+%.1f%%)  [3:1 R:R]\n\n",
+			tp.Target2,
+			((tp.Target2-tp.EntryPrice)/tp.EntryPrice)*100))
 	} else {
-		// Fallback to original format if no trade plan
-		// Primary reasoning
-		sb.WriteString(fmt.Sprintf("💡 <b>Reason:</b>\n%s\n\n", html.EscapeString(data.PrimaryReasoning)))
-
-		// Rules triggered
-		if len(data.RulesTriggered) > 0 {
-			sb.WriteString("📋 <b>Rules Triggered:</b>\n")
-			for _, rule := range data.RulesTriggered {
-				sb.WriteString(fmt.Sprintf("  • %s (%.0f%%)\n", html.EscapeString(rule.RuleName), rule.Confidence*100))
-			}
-			sb.WriteString("\n")
-		}
-
 		// Scale-in specific info
 		if isScaleIn {
 			sb.WriteString("⚠️ <b>Note:</b> This is an averaging down opportunity.\n")

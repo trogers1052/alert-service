@@ -514,7 +514,7 @@ func TestFormatDecisionMessage_BuyWithTradePlan(t *testing.T) {
 	msg := s.formatDecisionMessage(event)
 
 	assert.Contains(t, msg, "BUY Signal: AAPL")
-	assert.Contains(t, msg, "Oversold Bounce")
+	assert.Contains(t, msg, "Reason:")
 	assert.Contains(t, msg, "85%") // confidence
 	assert.Contains(t, msg, "$49.50") // entry zone low
 	assert.Contains(t, msg, "$50.50") // entry zone high
