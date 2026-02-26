@@ -995,10 +995,20 @@ func TestHandleDecisionEvent_BuySignalSendsKeyboard(t *testing.T) {
 	err := s.HandleDecisionEvent(context.Background(), event)
 	require.NoError(t, err)
 
-	// BUY signals should include feedback keyboard
+	// BUY signals should include feedback keyboard with only "Traded" button
 	require.NotNil(t, receivedReq.ReplyMarkup)
 	assert.Equal(t, 1, len(receivedReq.ReplyMarkup.InlineKeyboard))
-	assert.Equal(t, 2, len(receivedReq.ReplyMarkup.InlineKeyboard[0]))
+	assert.Equal(t, 1, len(receivedReq.ReplyMarkup.InlineKeyboard[0]))
+	assert.Contains(t, receivedReq.ReplyMarkup.InlineKeyboard[0][0].Text, "Traded")
+
+	// Default "skipped" feedback should already be recorded in-memory
+	feedbackLog := s.GetFeedbackLog()
+	require.Equal(t, 1, len(feedbackLog))
+	for _, entry := range feedbackLog {
+		assert.Equal(t, "AAPL", entry.Symbol)
+		assert.Equal(t, "BUY", entry.Signal)
+		assert.Equal(t, "skipped", entry.Action)
+	}
 }
 
 func TestHandleDecisionEvent_WatchSignalNoKeyboard(t *testing.T) {
@@ -1109,21 +1119,31 @@ func TestHandleFeedbackCallback_ValidTraded(t *testing.T) {
 	assert.Equal(t, "traded", entry.Action)
 }
 
-func TestHandleFeedbackCallback_ValidSkipped(t *testing.T) {
+func TestHandleFeedbackCallback_TradedOverridesDefaultSkipped(t *testing.T) {
 	s, srv := newTestService(t)
 	defer srv.Close()
 
+	// Simulate the default "skipped" recorded at send time
+	s.feedbackMu.Lock()
+	s.feedbackLog["GOOG:BUY:130000"] = models.FeedbackEntry{
+		Symbol: "GOOG",
+		Signal: "BUY",
+		Action: "skipped",
+		Timestamp: time.Now(),
+	}
+	s.feedbackMu.Unlock()
+
+	// User presses "Traded" — should override
 	cb := &telegram.CallbackQuery{
 		ID:   "cb2",
-		Data: "fb:GOOG:SELL:130000:skipped",
+		Data: "fb:GOOG:BUY:130000:traded",
 	}
-
 	s.handleFeedbackCallback(context.Background(), cb)
 
 	log := s.GetFeedbackLog()
-	entry, ok := log["GOOG:SELL:130000"]
+	entry, ok := log["GOOG:BUY:130000"]
 	require.True(t, ok)
-	assert.Equal(t, "skipped", entry.Action)
+	assert.Equal(t, "traded", entry.Action)
 }
 
 func TestHandleFeedbackCallback_InvalidFormat(t *testing.T) {

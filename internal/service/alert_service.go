@@ -154,11 +154,28 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 
 	if data.Signal == models.SignalBuy || data.Signal == models.SignalSell {
 		ts := time.Now().Format("150405") // compact timestamp for callback data
+		feedbackKey := fmt.Sprintf("%s:%s:%s", data.Symbol, data.Signal, ts)
+
+		// Default to "skipped" — record immediately so ignored alerts are tracked
+		defaultEntry := models.FeedbackEntry{
+			Symbol:    data.Symbol,
+			Signal:    data.Signal,
+			Action:    models.FeedbackSkipped,
+			Timestamp: time.Now(),
+		}
+		s.feedbackMu.Lock()
+		s.feedbackLog[feedbackKey] = defaultEntry
+		s.feedbackMu.Unlock()
+
+		if s.stockClient != nil {
+			s.stockClient.PostFeedback(ctx, data.Symbol, data.Signal, models.FeedbackSkipped, data.Confidence)
+		}
+
+		// Only show "Traded" button — skipped is the default
 		keyboard := &telegram.InlineKeyboardMarkup{
 			InlineKeyboard: [][]telegram.InlineKeyboardButton{
 				{
 					{Text: "✅ Traded", CallbackData: fmt.Sprintf("fb:%s:%s:%s:traded", data.Symbol, data.Signal, ts)},
-					{Text: "❌ Skipped", CallbackData: fmt.Sprintf("fb:%s:%s:%s:skipped", data.Symbol, data.Signal, ts)},
 				},
 			},
 		}
@@ -668,7 +685,7 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 
 	symbol := parts[1]
 	signal := parts[2]
-	action := parts[4] // "traded" or "skipped"
+	action := parts[4] // "traded" (skipped is now the default recorded at send time)
 
 	entry := models.FeedbackEntry{
 		Symbol:    symbol,
@@ -677,21 +694,21 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 		Timestamp: time.Now(),
 	}
 
-	// Store feedback in-memory
+	// Update in-memory feedback (overrides the default "skipped")
 	feedbackKey := fmt.Sprintf("%s:%s:%s", symbol, signal, parts[3])
 	s.feedbackMu.Lock()
 	s.feedbackLog[feedbackKey] = entry
 	s.feedbackMu.Unlock()
 
-	// Persist to PostgreSQL via stock-service (best-effort)
+	// Persist update to PostgreSQL via stock-service (best-effort)
 	if s.stockClient != nil {
 		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0)
 	}
 
-	log.Printf("FEEDBACK: %s %s → %s", symbol, signal, action)
+	log.Printf("FEEDBACK: %s %s → %s (updated from default skipped)", symbol, signal, action)
 
 	// Acknowledge the button press
-	ackText := fmt.Sprintf("Recorded: %s %s", symbol, action)
+	ackText := fmt.Sprintf("Recorded: %s %s ✅", symbol, action)
 	if err := s.telegramClient.AnswerCallbackQuery(ctx, cb.ID, ackText); err != nil {
 		log.Printf("Failed to answer callback query: %v", err)
 	}
