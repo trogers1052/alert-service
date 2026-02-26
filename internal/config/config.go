@@ -35,6 +35,9 @@ type Config struct {
 	EnableQuietHours   bool   // Whether to enable quiet hours
 	QuietHoursTimezone string // IANA timezone name for quiet hours (e.g. "America/New_York")
 
+	// Symbol muting — context/indicator symbols that should never trigger alerts
+	MutedSymbols map[string]bool
+
 	// Stock-service — used for persisting feedback entries to PostgreSQL
 	StockServiceURL string
 }
@@ -67,6 +70,9 @@ func Load() (*Config, error) {
 		QuietHoursEnd:      getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
 		EnableQuietHours:   getEnvBool("ENABLE_QUIET_HOURS", false),
 		QuietHoursTimezone: getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
+
+		// Symbol muting
+		MutedSymbols: getEnvSymbolSet("MUTED_SYMBOLS"),
 
 		// Stock-service
 		StockServiceURL: getEnv("STOCK_SERVICE_URL", "http://stock-service:8081"),
@@ -124,4 +130,19 @@ func getEnvBool(key string, defaultValue bool) bool {
 		}
 	}
 	return defaultValue
+}
+
+func getEnvSymbolSet(key string) map[string]bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
+	}
+	set := make(map[string]bool)
+	for _, s := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(s)
+		if trimmed != "" {
+			set[strings.ToUpper(trimmed)] = true
+		}
+	}
+	return set
 }

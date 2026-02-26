@@ -1232,3 +1232,63 @@ func TestCleanupExpiredCooldowns(t *testing.T) {
 	assert.True(t, buyExists, "recent ranking cooldown should remain")
 	assert.False(t, sellExists, "expired ranking cooldown should be cleaned up")
 }
+
+// ---------------------------------------------------------------------------
+// Muted symbols (context/indicator symbols)
+// ---------------------------------------------------------------------------
+
+func TestHandleDecisionEvent_MutedSymbolSkipped(t *testing.T) {
+	s, srv := newTestService(t)
+	defer srv.Close()
+
+	s.config.MutedSymbols = map[string]bool{"SPY": true, "QQQ": true, "GDX": true}
+
+	event := makeDecisionEvent("SPY", models.SignalBuy, 0.9)
+	err := s.HandleDecisionEvent(context.Background(), event)
+
+	require.NoError(t, err)
+	// Verify no cooldown was set (alert was never sent)
+	s.cooldownMu.RLock()
+	_, exists := s.cooldowns["SPY:BUY"]
+	s.cooldownMu.RUnlock()
+	assert.False(t, exists, "muted symbol should not create a cooldown entry")
+}
+
+func TestHandleDecisionEvent_NonMutedSymbolNotBlocked(t *testing.T) {
+	s, srv := newTestService(t)
+	defer srv.Close()
+
+	s.config.MutedSymbols = map[string]bool{"SPY": true, "QQQ": true}
+
+	event := makeDecisionEvent("CCJ", models.SignalBuy, 0.8)
+	// CCJ is not muted but may fail on other gates (no trade plan → low R:R).
+	// Disable R:R gate so we can verify it passes the mute check.
+	s.config.MinRRRatio = 0
+
+	err := s.HandleDecisionEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	// Verify cooldown WAS set (alert was sent)
+	s.cooldownMu.RLock()
+	_, exists := s.cooldowns["CCJ:BUY"]
+	s.cooldownMu.RUnlock()
+	assert.True(t, exists, "non-muted symbol should pass the mute check and create cooldown")
+}
+
+func TestHandleDecisionEvent_NilMutedSymbolsNoError(t *testing.T) {
+	s, srv := newTestService(t)
+	defer srv.Close()
+
+	// MutedSymbols is nil (no env var set) — should not panic
+	s.config.MutedSymbols = nil
+	s.config.MinRRRatio = 0
+
+	event := makeDecisionEvent("CCJ", models.SignalBuy, 0.8)
+	err := s.HandleDecisionEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	s.cooldownMu.RLock()
+	_, exists := s.cooldowns["CCJ:BUY"]
+	s.cooldownMu.RUnlock()
+	assert.True(t, exists, "nil MutedSymbols should not block any alerts")
+}

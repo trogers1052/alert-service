@@ -98,6 +98,12 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 
 	data := decision.Data
 
+	// Check if symbol is muted (context/indicator symbol)
+	if s.config.MutedSymbols[strings.ToUpper(data.Symbol)] {
+		log.Printf("Skipping alert for %s: muted context symbol", data.Symbol)
+		return nil
+	}
+
 	// Check if we should alert for this signal type
 	if !s.shouldAlertForSignal(data.Signal) {
 		log.Printf("Skipping alert for %s %s signal (not configured)", data.Symbol, data.Signal)
