@@ -423,8 +423,12 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 		// Entry zone, stop, targets
 		sb.WriteString(fmt.Sprintf("<b>Entry zone:</b>  $%.2f – $%.2f\n", tp.EntryZoneLow, tp.EntryZoneHigh))
-		sb.WriteString(fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]\n",
-			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod)))
+		stopLine := fmt.Sprintf("<b>Stop loss:</b>   $%.2f  (–%.1f%%)  [%s]",
+			tp.StopPrice, tp.StopPct, s.formatStopMethod(tp.StopMethod))
+		if tp.SupportLevelUsed != nil {
+			stopLine += fmt.Sprintf("  (below %s)", html.EscapeString(*tp.SupportLevelUsed))
+		}
+		sb.WriteString(stopLine + "\n")
 
 		// Target 1 with probability and timeframe
 		t1Line := fmt.Sprintf("<b>Target 1:</b>    $%.2f  (+%.1f%%)  [%.1f:1 R:R]",
@@ -443,7 +447,15 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		if tp.Target2Probability != nil && tp.Target2EstDays != nil {
 			t2Line += fmt.Sprintf("  ~%d%% / ~%dd", int(*tp.Target2Probability*100), *tp.Target2EstDays)
 		}
-		sb.WriteString(t2Line + "\n\n")
+		sb.WriteString(t2Line + "\n")
+
+		// Goal projection
+		if tp.GoalYears != nil && tp.ExpectedAnnualReturn != nil {
+			sb.WriteString(fmt.Sprintf("🎯 ~%.0f yrs to $1M  (%.1f%% est. annual return)\n\n",
+				*tp.GoalYears, *tp.ExpectedAnnualReturn))
+		} else {
+			sb.WriteString("\n")
+		}
 	} else {
 		// Scale-in specific info
 		if isScaleIn {
@@ -528,13 +540,17 @@ func (s *AlertService) formatSetupType(setupType string) string {
 
 // formatStopMethod converts stop method to display format
 func (s *AlertService) formatStopMethod(method string) string {
-	switch method {
-	case "atr_2x":
+	switch {
+	case method == "atr_2x":
 		return "ATR×2"
-	case "percentage_4pct":
+	case method == "percentage_4pct":
 		return "4%"
-	case "percentage_10pct":
+	case method == "percentage_10pct":
 		return "10%"
+	case strings.HasPrefix(method, "config_"):
+		return strings.TrimPrefix(method, "config_")
+	case strings.HasPrefix(method, "support_"):
+		return strings.ToUpper(strings.TrimPrefix(method, "support_"))
 	default:
 		return html.EscapeString(method)
 	}

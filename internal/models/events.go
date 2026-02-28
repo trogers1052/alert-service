@@ -95,6 +95,7 @@ type TradePlan struct {
 	StopPrice        float64  `json:"stop_price"`
 	StopMethod       string   `json:"stop_method"`
 	StopPct          float64  `json:"stop_pct"`
+	SupportLevelUsed *string  `json:"support_level_used,omitempty"`
 	Target1          float64  `json:"target_1"`
 	Target2          float64  `json:"target_2"`
 	SymbolTargetPct  *float64 `json:"symbol_target_pct,omitempty"`
@@ -107,12 +108,14 @@ type TradePlan struct {
 	Target2EstDays     *int     `json:"target_2_est_days,omitempty"`
 	PriceContext       *string  `json:"price_context,omitempty"`
 
-	RiskRewardRatio  float64  `json:"risk_reward_ratio"`
-	Shares           int      `json:"shares"`
-	DollarRisk       float64  `json:"dollar_risk"`
-	RiskPct          float64  `json:"risk_pct"`
-	PositionValue    float64  `json:"position_value"`
-	InvalidationPrice float64 `json:"invalidation_price"`
+	RiskRewardRatio      float64  `json:"risk_reward_ratio"`
+	Shares               int      `json:"shares"`
+	DollarRisk           float64  `json:"dollar_risk"`
+	RiskPct              float64  `json:"risk_pct"`
+	PositionValue        float64  `json:"position_value"`
+	GoalYears            *float64 `json:"goal_years,omitempty"`
+	ExpectedAnnualReturn *float64 `json:"expected_annual_return,omitempty"`
+	InvalidationPrice    float64  `json:"invalidation_price"`
 	PlanValid        bool     `json:"plan_valid"`
 	RRWarning        *string  `json:"rr_warning,omitempty"`
 	Warnings         []string `json:"warnings"`
