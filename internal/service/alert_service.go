@@ -331,6 +331,32 @@ func (s *AlertService) isQuietHours() bool {
 	return hour >= start && hour < end
 }
 
+// formatTierBadge returns a tier badge string for Telegram display.
+// Returns empty string if no tier data is available.
+func formatTierBadge(td *models.TierData) string {
+	if td == nil || td.Tier == "" {
+		return ""
+	}
+	var icon string
+	switch td.Tier {
+	case "S":
+		icon = "🏆"
+	case "A":
+		icon = "🟢"
+	case "B":
+		icon = "🔵"
+	case "C":
+		icon = "🟡"
+	case "D":
+		icon = "🟠"
+	case "F":
+		icon = "🔴"
+	default:
+		return ""
+	}
+	return fmt.Sprintf(" %s [%s-tier]", icon, td.Tier)
+}
+
 // formatDecisionMessage formats a decision event into a Telegram message
 func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string {
 	data := event.Data
@@ -362,17 +388,30 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 
 	sym := html.EscapeString(data.Symbol)
 
+	// Tier badge (e.g. " 🟢 [A-tier]")
+	tierBadge := formatTierBadge(data.TierData)
+
 	// Header
 	if data.TradePlan != nil {
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>%s\n", emoji, signalLabel, sym, tierBadge))
 		sb.WriteString(fmt.Sprintf("Confidence: %.0f%%\n\n", data.Confidence*100))
 	} else if isScaleIn {
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n", emoji, signalLabel, sym))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>%s\n", emoji, signalLabel, sym, tierBadge))
 		sb.WriteString("➕ <i>Adding to existing position</i>\n\n")
 	} else {
 		confidenceBar := s.formatConfidenceBar(data.Confidence)
-		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>\n\n", emoji, signalLabel, sym))
+		sb.WriteString(fmt.Sprintf("%s <b>%s Signal: %s</b>%s\n\n", emoji, signalLabel, sym, tierBadge))
 		sb.WriteString(fmt.Sprintf("📊 Confidence: %.0f%% %s\n\n", data.Confidence*100, confidenceBar))
+	}
+
+	// Tier info line (score + regime-conditional warning)
+	if data.TierData != nil && data.TierData.Tier != "" {
+		sb.WriteString(fmt.Sprintf("Tier: %s (score: %.1f/100)\n", data.TierData.Tier, data.TierData.CompositeScore))
+		if data.TierData.RegimeConditional && len(data.TierData.AllowedRegimes) > 0 {
+			regimes := strings.Join(data.TierData.AllowedRegimes, "/")
+			sb.WriteString(fmt.Sprintf("⚠️ %s-only stock (regime-conditional)\n", regimes))
+		}
+		sb.WriteString("\n")
 	}
 
 	// Reason and rules (always shown — the "why" behind the signal)
@@ -412,6 +451,13 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 		// R:R Warning if plan is not valid
 		if !tp.PlanValid && tp.RRWarning != nil {
 			sb.WriteString(fmt.Sprintf("⚠️ %s\n", html.EscapeString(*tp.RRWarning)))
+		}
+
+		// Portfolio risk warnings from risk engine
+		if data.RiskAssessment != nil && len(data.RiskAssessment.Warnings) > 0 {
+			for _, w := range data.RiskAssessment.Warnings {
+				sb.WriteString(fmt.Sprintf("⚠️ %s\n", html.EscapeString(w)))
+			}
 		}
 
 		sb.WriteString("\n")

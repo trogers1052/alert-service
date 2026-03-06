@@ -24,6 +24,15 @@ type DecisionEvent struct {
 	Data          DecisionData  `json:"data"`
 }
 
+// TierData contains tier ranking metadata from backtesting validation
+type TierData struct {
+	Tier                 string   `json:"tier"`
+	CompositeScore       float64  `json:"composite_score"`
+	ConfidenceMultiplier float64  `json:"confidence_multiplier"`
+	RegimeConditional    bool     `json:"regime_conditional"`
+	AllowedRegimes       []string `json:"allowed_regimes,omitempty"`
+}
+
 // DecisionData contains the actual decision information
 type DecisionData struct {
 	Symbol             string                 `json:"symbol"`
@@ -35,6 +44,8 @@ type DecisionData struct {
 	Metadata           map[string]interface{} `json:"metadata"`
 	TradePlan          *TradePlan             `json:"trade_plan,omitempty"`
 	Checklist          *Checklist             `json:"checklist,omitempty"`
+	RiskAssessment     *RiskAssessment        `json:"risk_assessment,omitempty"`
+	TierData           *TierData              `json:"tier_data,omitempty"`
 }
 
 // Validate checks that all required fields in a DecisionEvent are present and
@@ -119,6 +130,19 @@ type TradePlan struct {
 	PlanValid        bool     `json:"plan_valid"`
 	RRWarning        *string  `json:"rr_warning,omitempty"`
 	Warnings         []string `json:"warnings"`
+}
+
+// RiskAssessment contains risk engine evaluation results
+type RiskAssessment struct {
+	Passes               bool               `json:"passes"`
+	RiskScore            float64            `json:"risk_score"`
+	RiskLevel            string             `json:"risk_level"`
+	RecommendedShares    int                `json:"recommended_shares"`
+	MaxShares            int                `json:"max_shares"`
+	RecommendedDollarAmt float64            `json:"recommended_dollar_amount"`
+	Reason               string             `json:"reason"`
+	RiskMetrics          map[string]float64 `json:"risk_metrics"`
+	Warnings             []string           `json:"warnings"`
 }
 
 // RuleResult represents a single rule that was triggered
