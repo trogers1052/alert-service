@@ -147,6 +147,9 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 						continue
 					}
 
+					log.Printf("Received decision: %s %s (confidence=%.2f, offset=%d)",
+						event.Data.Symbol, event.Data.Signal, event.Data.Confidence, message.Offset)
+
 					// Retry handler failures — trading alerts are high-value
 					// and transient Telegram errors should not silently drop them.
 					var handlerErr error
@@ -177,6 +180,9 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 						session.MarkMessage(message, "")
 						continue
 					}
+
+					log.Printf("Received ranking: %s (%d symbols, offset=%d)",
+						event.Data.SignalType, len(event.Data.Rankings), message.Offset)
 
 					if err := h.consumer.rankingHandler(ctx, &event); err != nil {
 						log.Printf("Failed to handle ranking event: %v", err)

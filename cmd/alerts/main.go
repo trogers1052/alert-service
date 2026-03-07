@@ -16,6 +16,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	log.Println("Starting alert-service...")
 
 	// Health endpoint — Docker/systemd HEALTHCHECK target

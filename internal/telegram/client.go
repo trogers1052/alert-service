@@ -161,6 +161,7 @@ func (c *Client) doSend(ctx context.Context, message, parseMode string) error {
 		return fmt.Errorf("telegram API error: %s", response.Description)
 	}
 
+	log.Printf("Telegram message sent successfully (chat_id=%d)", c.chatID)
 	return nil
 }
 
