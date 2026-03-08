@@ -165,8 +165,32 @@ func (c *Client) doSend(ctx context.Context, message, parseMode string) error {
 	return nil
 }
 
-// SendMessageWithKeyboard sends a message with inline keyboard buttons and returns the message ID
+// SendMessageWithKeyboard sends a message with inline keyboard buttons and returns the message ID.
+// Retries up to 3 times with exponential backoff on transient failures.
 func (c *Client) SendMessageWithKeyboard(ctx context.Context, message string, keyboard *InlineKeyboardMarkup) (int64, error) {
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt*attempt) * time.Second // 1s, 4s
+			log.Printf("Telegram keyboard send attempt %d/%d failed, retrying in %s: %v", attempt, maxRetries, delay, lastErr)
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		messageID, err := c.doSendWithKeyboard(ctx, message, keyboard)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return messageID, nil
+	}
+	return 0, fmt.Errorf("telegram keyboard send failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func (c *Client) doSendWithKeyboard(ctx context.Context, message string, keyboard *InlineKeyboardMarkup) (int64, error) {
 	url := fmt.Sprintf(telegramSendURL, c.botToken)
 
 	reqBody := SendMessageRequest{

@@ -1,6 +1,6 @@
 module github.com/trogers1052/alert-service
 
-go 1.23
+go 1.24
 
 require (
 	github.com/IBM/sarama v1.43.0

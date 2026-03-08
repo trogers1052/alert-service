@@ -196,8 +196,11 @@ const (
 
 // FeedbackEntry records whether the user acted on a signal
 type FeedbackEntry struct {
-	Symbol    string    `json:"symbol"`
-	Signal    string    `json:"signal"`
-	Action    string    `json:"action"` // "traded" or "skipped"
-	Timestamp time.Time `json:"timestamp"`
+	Symbol         string    `json:"symbol"`
+	Signal         string    `json:"signal"`
+	Action         string    `json:"action"` // "traded" or "skipped"
+	Timestamp      time.Time `json:"timestamp"`
+	RulesTriggered []string  `json:"rules_triggered,omitempty"`
+	RegimeID       string    `json:"regime_id,omitempty"`
+	FeedbackID     int       `json:"feedback_id,omitempty"` // stock-service row ID for UPDATE
 }

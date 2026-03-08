@@ -87,6 +87,18 @@ func (s *AlertService) cleanupExpiredCooldowns() {
 		}
 	}
 	s.rankingCooldownMu.Unlock()
+
+	// Evict feedback entries older than 7 days — feedback is already
+	// persisted to PostgreSQL via stock-service, so the in-memory map
+	// only needs recent entries for the GetFeedbackLog reporting method.
+	feedbackCutoff := time.Now().Add(-7 * 24 * time.Hour)
+	s.feedbackMu.Lock()
+	for key, entry := range s.feedbackLog {
+		if entry.Timestamp.Before(feedbackCutoff) {
+			delete(s.feedbackLog, key)
+		}
+	}
+	s.feedbackMu.Unlock()
 }
 
 // HandleDecisionEvent processes a decision event and sends alerts if appropriate
@@ -162,20 +174,36 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		ts := time.Now().Format("150405") // compact timestamp for callback data
 		feedbackKey := fmt.Sprintf("%s:%s:%s", data.Symbol, data.Signal, ts)
 
+		// Extract rule names and regime for enriched feedback
+		var ruleNames []string
+		for _, r := range data.RulesTriggered {
+			ruleNames = append(ruleNames, r.RuleName)
+		}
+		regimeID := ""
+		if data.Checklist != nil {
+			regimeID = data.Checklist.RegimeID
+		}
+
 		// Default to "skipped" — record immediately so ignored alerts are tracked
 		defaultEntry := models.FeedbackEntry{
-			Symbol:    data.Symbol,
-			Signal:    data.Signal,
-			Action:    models.FeedbackSkipped,
-			Timestamp: time.Now(),
+			Symbol:         data.Symbol,
+			Signal:         data.Signal,
+			Action:         models.FeedbackSkipped,
+			Timestamp:      time.Now(),
+			RulesTriggered: ruleNames,
+			RegimeID:       regimeID,
 		}
+
+		// Send enriched feedback to stock-service and capture the row ID
+		if s.stockClient != nil {
+			fbID := s.stockClient.PostFeedback(ctx, data.Symbol, data.Signal,
+				models.FeedbackSkipped, data.Confidence, ruleNames, regimeID, data.Confidence)
+			defaultEntry.FeedbackID = fbID
+		}
+
 		s.feedbackMu.Lock()
 		s.feedbackLog[feedbackKey] = defaultEntry
 		s.feedbackMu.Unlock()
-
-		if s.stockClient != nil {
-			s.stockClient.PostFeedback(ctx, data.Symbol, data.Signal, models.FeedbackSkipped, data.Confidence)
-		}
 
 		// Only show "Traded" button — skipped is the default
 		keyboard := &telegram.InlineKeyboardMarkup{
@@ -762,15 +790,24 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 		Timestamp: time.Now(),
 	}
 
-	// Update in-memory feedback (overrides the default "skipped")
+	// Look up enrichment from feedbackLog to get the stored row ID
 	feedbackKey := fmt.Sprintf("%s:%s:%s", symbol, signal, parts[3])
+	s.feedbackMu.RLock()
+	original, exists := s.feedbackLog[feedbackKey]
+	s.feedbackMu.RUnlock()
+
+	// Update in-memory feedback (overrides the default "skipped")
 	s.feedbackMu.Lock()
 	s.feedbackLog[feedbackKey] = entry
 	s.feedbackMu.Unlock()
 
 	// Persist update to PostgreSQL via stock-service (best-effort)
-	if s.stockClient != nil {
-		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0)
+	if exists && original.FeedbackID > 0 && s.stockClient != nil {
+		// UPDATE existing row instead of creating duplicate
+		s.stockClient.UpdateFeedbackAction(ctx, original.FeedbackID, action)
+	} else if s.stockClient != nil {
+		// Fallback: POST new row (unenriched — no stored ID)
+		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0, nil, "", 0)
 	}
 
 	log.Printf("FEEDBACK: %s %s → %s (updated from default skipped)", symbol, signal, action)

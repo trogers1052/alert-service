@@ -44,16 +44,43 @@ func TestPostFeedback_Success(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &receivedBody))
 
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int{"id": 42})
 	}))
 	defer server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0.85)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0.85, nil, "", 0)
 
+	assert.Equal(t, 42, id)
 	assert.Equal(t, "AAPL", receivedBody.Symbol)
 	assert.Equal(t, "BUY", receivedBody.Signal)
 	assert.Equal(t, "traded", receivedBody.Action)
 	assert.InDelta(t, 0.85, receivedBody.Confidence, 0.001)
+}
+
+func TestPostFeedback_WithEnrichment(t *testing.T) {
+	var receivedBody feedbackRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &receivedBody))
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int{"id": 99})
+	}))
+	defer server.Close()
+
+	c := NewStockServiceClient(server.URL)
+	rules := []string{"MomentumReversal", "RSIOversold"}
+	id := c.PostFeedback(context.Background(), "TSLA", "BUY", "skipped", 0.72,
+		rules, "BULL", 0.72)
+
+	assert.Equal(t, 99, id)
+	assert.Equal(t, "TSLA", receivedBody.Symbol)
+	assert.Equal(t, []string{"MomentumReversal", "RSIOversold"}, receivedBody.RulesTriggered)
+	assert.Equal(t, "BULL", receivedBody.RegimeID)
+	assert.InDelta(t, 0.72, receivedBody.DecisionConfidence, 0.001)
 }
 
 func TestPostFeedback_NonCreatedStatus(t *testing.T) {
@@ -63,8 +90,8 @@ func TestPostFeedback_NonCreatedStatus(t *testing.T) {
 	defer server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	// Should not panic — errors are logged, not returned
-	c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0)
+	assert.Equal(t, 0, id)
 }
 
 func TestPostFeedback_NetworkError(t *testing.T) {
@@ -73,13 +100,14 @@ func TestPostFeedback_NetworkError(t *testing.T) {
 	server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	// Should not panic
-	c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0)
+	assert.Equal(t, 0, id)
 }
 
 func TestPostFeedback_CancelledContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int{"id": 1})
 	}))
 	defer server.Close()
 
@@ -87,6 +115,40 @@ func TestPostFeedback_CancelledContext(t *testing.T) {
 	cancel() // cancel immediately
 
 	c := NewStockServiceClient(server.URL)
-	// Should not panic — cancelled context is handled
-	c.PostFeedback(ctx, "AAPL", "BUY", "traded", 0)
+	id := c.PostFeedback(ctx, "AAPL", "BUY", "traded", 0, nil, "", 0)
+	assert.Equal(t, 0, id)
+}
+
+// ---------------------------------------------------------------------------
+// UpdateFeedbackAction
+// ---------------------------------------------------------------------------
+
+func TestUpdateFeedbackAction_Success(t *testing.T) {
+	var receivedBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/feedback/42", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &receivedBody))
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := NewStockServiceClient(server.URL)
+	c.UpdateFeedbackAction(context.Background(), 42, "traded")
+
+	assert.Equal(t, "traded", receivedBody["action"])
+}
+
+func TestUpdateFeedbackAction_NetworkError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	server.Close()
+
+	c := NewStockServiceClient(server.URL)
+	// Should not panic
+	c.UpdateFeedbackAction(context.Background(), 42, "traded")
 }
