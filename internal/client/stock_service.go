@@ -39,10 +39,24 @@ type feedbackRequest struct {
 	RulesTriggered     []string `json:"rules_triggered,omitempty"`
 	RegimeID           string   `json:"regime_id,omitempty"`
 	DecisionConfidence float64  `json:"decision_confidence,omitempty"`
+	EntryPrice         float64  `json:"entry_price,omitempty"`
+	StopPrice          float64  `json:"stop_price,omitempty"`
+	Target1            float64  `json:"target_1,omitempty"`
+	Target2            float64  `json:"target_2,omitempty"`
+	ValidUntil         string   `json:"valid_until,omitempty"`
 }
 
 type feedbackResponse struct {
 	ID int `json:"id"`
+}
+
+// FeedbackParams holds optional trade plan data for feedback persistence.
+type FeedbackParams struct {
+	EntryPrice float64
+	StopPrice  float64
+	Target1    float64
+	Target2    float64
+	ValidUntil string
 }
 
 // PostFeedback sends a feedback entry to stock-service for PostgreSQL storage.
@@ -54,8 +68,9 @@ func (c *StockServiceClient) PostFeedback(
 	rulesTriggered []string,
 	regimeID string,
 	decisionConfidence float64,
+	params *FeedbackParams,
 ) int {
-	body, err := json.Marshal(feedbackRequest{
+	req := feedbackRequest{
 		Symbol:             symbol,
 		Signal:             signal,
 		Action:             action,
@@ -63,21 +78,29 @@ func (c *StockServiceClient) PostFeedback(
 		RulesTriggered:     rulesTriggered,
 		RegimeID:           regimeID,
 		DecisionConfidence: decisionConfidence,
-	})
+	}
+	if params != nil {
+		req.EntryPrice = params.EntryPrice
+		req.StopPrice = params.StopPrice
+		req.Target1 = params.Target1
+		req.Target2 = params.Target2
+		req.ValidUntil = params.ValidUntil
+	}
+	body, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("WARNING: failed to marshal feedback for stock-service: %v", err)
 		return 0
 	}
 
 	url := fmt.Sprintf("%s/api/v1/feedback", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("WARNING: failed to create feedback request: %v", err)
 		return 0
 	}
-	req.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("WARNING: failed to POST feedback to stock-service: %v", err)
 		return 0

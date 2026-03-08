@@ -32,6 +32,7 @@ type AlertService struct {
 
 	stopCleanup    chan struct{}
 	stopFeedback   chan struct{}
+	stopRetry      chan struct{}
 }
 
 // NewAlertService creates a new alert service
@@ -45,6 +46,7 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 		stockClient:      client.NewStockServiceClient(cfg.StockServiceURL),
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
+		stopRetry:        make(chan struct{}),
 	}
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -60,6 +62,8 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 	}()
 	// Start polling for Telegram callback queries (feedback buttons)
 	go s.pollFeedbackCallbacks()
+	// Start retry loop for failed feedback POSTs
+	go s.retryFailedFeedback()
 	return s
 }
 
@@ -67,6 +71,7 @@ func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *Alert
 func (s *AlertService) Close() {
 	close(s.stopCleanup)
 	close(s.stopFeedback)
+	close(s.stopRetry)
 }
 
 func (s *AlertService) cleanupExpiredCooldowns() {
@@ -196,8 +201,18 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 
 		// Send enriched feedback to stock-service and capture the row ID
 		if s.stockClient != nil {
+			var fbParams *client.FeedbackParams
+			if data.TradePlan != nil {
+				fbParams = &client.FeedbackParams{
+					EntryPrice: data.TradePlan.EntryPrice,
+					StopPrice:  data.TradePlan.StopPrice,
+					Target1:    data.TradePlan.Target1,
+					Target2:    data.TradePlan.Target2,
+					ValidUntil: data.TradePlan.ValidUntil,
+				}
+			}
 			fbID := s.stockClient.PostFeedback(ctx, data.Symbol, data.Signal,
-				models.FeedbackSkipped, data.Confidence, ruleNames, regimeID, data.Confidence)
+				models.FeedbackSkipped, data.Confidence, ruleNames, regimeID, data.Confidence, fbParams)
 			defaultEntry.FeedbackID = fbID
 		}
 
@@ -807,7 +822,7 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 		s.stockClient.UpdateFeedbackAction(ctx, original.FeedbackID, action)
 	} else if s.stockClient != nil {
 		// Fallback: POST new row (unenriched — no stored ID)
-		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0, nil, "", 0)
+		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0, nil, "", 0, nil)
 	}
 
 	log.Printf("FEEDBACK: %s %s → %s (updated from default skipped)", symbol, signal, action)
@@ -816,6 +831,55 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 	ackText := fmt.Sprintf("Recorded: %s %s ✅", symbol, action)
 	if err := s.telegramClient.AnswerCallbackQuery(ctx, cb.ID, ackText); err != nil {
 		log.Printf("Failed to answer callback query: %v", err)
+	}
+}
+
+// retryFailedFeedback periodically scans feedbackLog for entries where the
+// initial POST to stock-service failed (FeedbackID == 0) and retries them.
+func (s *AlertService) retryFailedFeedback() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if s.stockClient == nil {
+				continue
+			}
+			s.feedbackMu.RLock()
+			var retryKeys []string
+			for key, entry := range s.feedbackLog {
+				if entry.FeedbackID == 0 {
+					retryKeys = append(retryKeys, key)
+				}
+			}
+			s.feedbackMu.RUnlock()
+
+			for _, key := range retryKeys {
+				s.feedbackMu.RLock()
+				entry, ok := s.feedbackLog[key]
+				s.feedbackMu.RUnlock()
+				if !ok || entry.FeedbackID != 0 {
+					continue
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				fbID := s.stockClient.PostFeedback(ctx, entry.Symbol, entry.Signal,
+					entry.Action, 0, entry.RulesTriggered, entry.RegimeID, 0, nil)
+				cancel()
+
+				if fbID > 0 {
+					s.feedbackMu.Lock()
+					if current, exists := s.feedbackLog[key]; exists && current.FeedbackID == 0 {
+						current.FeedbackID = fbID
+						s.feedbackLog[key] = current
+					}
+					s.feedbackMu.Unlock()
+					log.Printf("FEEDBACK RETRY: %s %s persisted (id=%d)", entry.Symbol, entry.Signal, fbID)
+				}
+			}
+		case <-s.stopRetry:
+			return
+		}
 	}
 }
 

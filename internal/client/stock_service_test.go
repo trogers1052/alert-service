@@ -49,7 +49,7 @@ func TestPostFeedback_Success(t *testing.T) {
 	defer server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0.85, nil, "", 0)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0.85, nil, "", 0, nil)
 
 	assert.Equal(t, 42, id)
 	assert.Equal(t, "AAPL", receivedBody.Symbol)
@@ -74,13 +74,45 @@ func TestPostFeedback_WithEnrichment(t *testing.T) {
 	c := NewStockServiceClient(server.URL)
 	rules := []string{"MomentumReversal", "RSIOversold"}
 	id := c.PostFeedback(context.Background(), "TSLA", "BUY", "skipped", 0.72,
-		rules, "BULL", 0.72)
+		rules, "BULL", 0.72, nil)
 
 	assert.Equal(t, 99, id)
 	assert.Equal(t, "TSLA", receivedBody.Symbol)
 	assert.Equal(t, []string{"MomentumReversal", "RSIOversold"}, receivedBody.RulesTriggered)
 	assert.Equal(t, "BULL", receivedBody.RegimeID)
 	assert.InDelta(t, 0.72, receivedBody.DecisionConfidence, 0.001)
+}
+
+func TestPostFeedback_WithTradePlanParams(t *testing.T) {
+	var receivedBody feedbackRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &receivedBody))
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int{"id": 55})
+	}))
+	defer server.Close()
+
+	c := NewStockServiceClient(server.URL)
+	params := &FeedbackParams{
+		EntryPrice: 25.50,
+		StopPrice:  24.00,
+		Target1:    28.00,
+		Target2:    30.50,
+		ValidUntil: "2026-03-10T16:00:00Z",
+	}
+	id := c.PostFeedback(context.Background(), "XYZ", "BUY", "skipped", 0.80,
+		[]string{"RSIOversold"}, "BULL", 0.80, params)
+
+	assert.Equal(t, 55, id)
+	assert.InDelta(t, 25.50, receivedBody.EntryPrice, 0.001)
+	assert.InDelta(t, 24.00, receivedBody.StopPrice, 0.001)
+	assert.InDelta(t, 28.00, receivedBody.Target1, 0.001)
+	assert.InDelta(t, 30.50, receivedBody.Target2, 0.001)
+	assert.Equal(t, "2026-03-10T16:00:00Z", receivedBody.ValidUntil)
 }
 
 func TestPostFeedback_NonCreatedStatus(t *testing.T) {
@@ -90,7 +122,7 @@ func TestPostFeedback_NonCreatedStatus(t *testing.T) {
 	defer server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0, nil)
 	assert.Equal(t, 0, id)
 }
 
@@ -100,7 +132,7 @@ func TestPostFeedback_NetworkError(t *testing.T) {
 	server.Close()
 
 	c := NewStockServiceClient(server.URL)
-	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0)
+	id := c.PostFeedback(context.Background(), "AAPL", "BUY", "traded", 0, nil, "", 0, nil)
 	assert.Equal(t, 0, id)
 }
 
@@ -115,7 +147,7 @@ func TestPostFeedback_CancelledContext(t *testing.T) {
 	cancel() // cancel immediately
 
 	c := NewStockServiceClient(server.URL)
-	id := c.PostFeedback(ctx, "AAPL", "BUY", "traded", 0, nil, "", 0)
+	id := c.PostFeedback(ctx, "AAPL", "BUY", "traded", 0, nil, "", 0, nil)
 	assert.Equal(t, 0, id)
 }
 
