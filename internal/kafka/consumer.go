@@ -3,7 +3,9 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -17,6 +19,11 @@ const (
 	// retry a few times to ride out transient Telegram failures.
 	handlerMaxRetries = 3
 	handlerRetryDelay = 2 * time.Second
+
+	// deadLetterPath is the file where failed decision events are persisted
+	// so they can be recovered and replayed.  This prevents silent alert loss
+	// when Telegram/stock-service is down for extended periods.
+	deadLetterPath = "/var/lib/alert-service/dead_letters.jsonl"
 )
 
 // MessageHandler is called when a message is received
@@ -165,10 +172,9 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 						}
 					}
 					if handlerErr != nil {
-						log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — alert may be lost",
+						log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — writing to dead letter file",
 							handlerMaxRetries, event.Data.Symbol, message.Offset, handlerErr)
-						// Mark the message to avoid stalling the consumer, but
-						// the CRITICAL log ensures visibility that an alert was dropped.
+						writeDeadLetter(message.Value, event.Data.Symbol, message.Offset, handlerErr)
 					}
 				}
 
@@ -196,5 +202,43 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 		case <-session.Context().Done():
 			return nil
 		}
+	}
+}
+
+// writeDeadLetter appends a failed decision event to a local JSONL file so it
+// can be recovered and replayed later.  This prevents silent alert loss when
+// downstream services (Telegram, stock-service) are unavailable.
+func writeDeadLetter(raw []byte, symbol string, offset int64, handlerErr error) {
+	entry := map[string]interface{}{
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"symbol":    symbol,
+		"offset":    offset,
+		"error":     handlerErr.Error(),
+		"event":     json.RawMessage(raw),
+	}
+
+	line, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("ERROR: failed to marshal dead letter entry: %v", err)
+		return
+	}
+
+	path := os.Getenv("DEAD_LETTER_PATH")
+	if path == "" {
+		path = deadLetterPath
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("ERROR: failed to open dead letter file %s: %v", path, err)
+		// Last resort: log the full event so it's at least in stdout/journald
+		log.Printf("DEAD_LETTER: %s", string(line))
+		return
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+		log.Printf("ERROR: failed to write dead letter: %v", err)
+		log.Printf("DEAD_LETTER: %s", string(line))
 	}
 }
