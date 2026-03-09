@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
 )
 
@@ -39,10 +40,16 @@ type Consumer struct {
 	ready            chan bool
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
+	metrics          metrics.Recorder
 }
 
-// NewConsumer creates a new Kafka consumer
-func NewConsumer(brokers []string, groupID, decisionTopic, rankingTopic string) (*Consumer, error) {
+// NewConsumer creates a new Kafka consumer.
+// The metrics.Recorder is used to record Kafka consumption and dead letter metrics.
+// Pass metrics.Nop{} when metrics collection is not needed.
+func NewConsumer(brokers []string, groupID, decisionTopic, rankingTopic string, m metrics.Recorder) (*Consumer, error) {
+	if m == nil {
+		m = metrics.Nop{}
+	}
 	config := sarama.NewConfig()
 	config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
@@ -58,6 +65,7 @@ func NewConsumer(brokers []string, groupID, decisionTopic, rankingTopic string) 
 		decisionTopic: decisionTopic,
 		rankingTopic:  rankingTopic,
 		ready:         make(chan bool),
+		metrics:       m,
 	}, nil
 }
 
@@ -136,6 +144,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 			}
 
 			ctx := session.Context()
+			h.consumer.metrics.IncKafkaConsumed(message.Topic)
 
 			// Determine message type based on topic
 			switch message.Topic {
@@ -175,6 +184,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 						log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — writing to dead letter file",
 							handlerMaxRetries, event.Data.Symbol, message.Offset, handlerErr)
 						writeDeadLetter(message.Value, event.Data.Symbol, message.Offset, handlerErr)
+						h.consumer.metrics.IncDeadLetters()
 					}
 				}
 

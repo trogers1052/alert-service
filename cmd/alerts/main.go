@@ -47,6 +47,9 @@ func main() {
 	// Metrics endpoint — Prometheus scrape target
 	startMetricsServer()
 
+	// Create Prometheus metrics recorder — injected into internal packages
+	metricsRecorder := newPromRecorder()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -66,7 +69,7 @@ func main() {
 	telegramClient := telegram.NewClient(cfg.TelegramBotToken, cfg.TelegramChatID)
 
 	// Create alert service
-	alertService := service.NewAlertService(cfg, telegramClient)
+	alertService := service.NewAlertService(cfg, telegramClient, metricsRecorder)
 
 	// Create Kafka consumer
 	consumer, err := kafka.NewConsumer(
@@ -74,6 +77,7 @@ func main() {
 		cfg.KafkaConsumerGroup,
 		cfg.KafkaDecisionTopic,
 		cfg.KafkaRankingTopic,
+		metricsRecorder,
 	)
 	if err != nil {
 		log.Fatalf("Failed to create Kafka consumer: %v", err)

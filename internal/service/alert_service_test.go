@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/trogers1052/alert-service/internal/client"
 	"github.com/trogers1052/alert-service/internal/config"
+	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
 	"github.com/trogers1052/alert-service/internal/telegram"
 )
@@ -89,6 +90,7 @@ func newTestService(t *testing.T) (*AlertService, *httptest.Server) {
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
 		stockClient:      nil,
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 	}
@@ -988,6 +990,7 @@ func TestHandleDecisionEvent_BuySignalSendsKeyboard(t *testing.T) {
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 	}
@@ -1032,6 +1035,7 @@ func TestHandleDecisionEvent_WatchSignalNoKeyboard(t *testing.T) {
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 	}
@@ -1301,6 +1305,7 @@ func TestRetryFailedFeedback_RetriesFailedEntries(t *testing.T) {
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 		stopRetry:        make(chan struct{}),
@@ -1379,6 +1384,7 @@ func TestRetryFailedFeedback_NoStockClientSkips(t *testing.T) {
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
 		stockClient:      nil, // No stock client
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 		stopRetry:        make(chan struct{}),
@@ -1409,6 +1415,7 @@ func TestRetryFailedFeedback_StopsOnChannel(t *testing.T) {
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
 		stockClient:      nil,
+		metrics:          metrics.Nop{},
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 		stopRetry:        make(chan struct{}),

@@ -8,26 +8,43 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/trogers1052/alert-service/internal/metrics"
 )
 
 // StockServiceClient sends feedback entries to the stock-service REST API
 // for permanent PostgreSQL storage.
 type StockServiceClient struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
+	metrics    metrics.Recorder
 }
 
 // NewStockServiceClient creates a client for the stock-service feedback API.
 // Returns nil if baseURL is empty.
-func NewStockServiceClient(baseURL string) *StockServiceClient {
+func NewStockServiceClient(baseURL string, opts ...string) *StockServiceClient {
 	if baseURL == "" {
 		return nil
 	}
+	apiKey := ""
+	if len(opts) > 0 {
+		apiKey = opts[0]
+	}
 	return &StockServiceClient{
 		baseURL: baseURL,
+		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
+		metrics: metrics.Nop{},
+	}
+}
+
+// SetMetrics configures the metrics recorder for this client.
+func (c *StockServiceClient) SetMetrics(m metrics.Recorder) {
+	if m != nil {
+		c.metrics = m
 	}
 }
 
@@ -89,6 +106,7 @@ func (c *StockServiceClient) PostFeedback(
 	body, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("WARNING: failed to marshal feedback for stock-service: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return 0
 	}
 
@@ -96,25 +114,32 @@ func (c *StockServiceClient) PostFeedback(
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("WARNING: failed to create feedback request: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return 0
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-API-Key", c.apiKey)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("WARNING: failed to POST feedback to stock-service: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return 0
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
 		log.Printf("WARNING: stock-service feedback returned status %d", resp.StatusCode)
+		c.metrics.IncFeedbackPostErrors()
 		return 0
 	}
 
 	var fbResp feedbackResponse
 	if err := json.NewDecoder(resp.Body).Decode(&fbResp); err != nil {
 		log.Printf("WARNING: failed to decode feedback response: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return 0
 	}
 
@@ -127,6 +152,7 @@ func (c *StockServiceClient) UpdateFeedbackAction(ctx context.Context, id int, a
 	body, err := json.Marshal(map[string]string{"action": action})
 	if err != nil {
 		log.Printf("WARNING: failed to marshal feedback update: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return
 	}
 
@@ -134,18 +160,24 @@ func (c *StockServiceClient) UpdateFeedbackAction(ctx context.Context, id int, a
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("WARNING: failed to create feedback update request: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		log.Printf("WARNING: failed to PUT feedback update to stock-service: %v", err)
+		c.metrics.IncFeedbackPostErrors()
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("WARNING: stock-service feedback update returned status %d", resp.StatusCode)
+		c.metrics.IncFeedbackPostErrors()
 	}
 }

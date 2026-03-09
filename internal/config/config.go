@@ -39,7 +39,8 @@ type Config struct {
 	MutedSymbols map[string]bool
 
 	// Stock-service — used for persisting feedback entries to PostgreSQL
-	StockServiceURL string
+	StockServiceURL    string
+	StockServiceAPIKey string
 }
 
 // Load loads configuration from environment variables
@@ -75,7 +76,8 @@ func Load() (*Config, error) {
 		MutedSymbols: getEnvSymbolSet("MUTED_SYMBOLS"),
 
 		// Stock-service
-		StockServiceURL: getEnv("STOCK_SERVICE_URL", "http://stock-service:8081"),
+		StockServiceURL:    getEnv("STOCK_SERVICE_URL", "http://stock-service:8081"),
+		StockServiceAPIKey: getEnv("STOCK_SERVICE_API_KEY", ""),
 	}
 
 	// Validate required fields

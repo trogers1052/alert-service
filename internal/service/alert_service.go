@@ -11,6 +11,7 @@ import (
 
 	"github.com/trogers1052/alert-service/internal/client"
 	"github.com/trogers1052/alert-service/internal/config"
+	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
 	"github.com/trogers1052/alert-service/internal/telegram"
 )
@@ -30,20 +31,32 @@ type AlertService struct {
 	feedbackMu    sync.RWMutex
 	stockClient   *client.StockServiceClient    // PostgreSQL persistence via stock-service (nil if unavailable)
 
+	metrics        metrics.Recorder
+
 	stopCleanup    chan struct{}
 	stopFeedback   chan struct{}
 	stopRetry      chan struct{}
 }
 
-// NewAlertService creates a new alert service
-func NewAlertService(cfg *config.Config, telegramClient *telegram.Client) *AlertService {
+// NewAlertService creates a new alert service.
+// The metrics.Recorder is used to record application-level Prometheus metrics.
+// Pass metrics.Nop{} when metrics collection is not needed (e.g. in tests).
+func NewAlertService(cfg *config.Config, telegramClient *telegram.Client, m metrics.Recorder) *AlertService {
+	if m == nil {
+		m = metrics.Nop{}
+	}
+	sc := client.NewStockServiceClient(cfg.StockServiceURL, cfg.StockServiceAPIKey)
+	if sc != nil {
+		sc.SetMetrics(m)
+	}
 	s := &AlertService{
 		config:           cfg,
 		telegramClient:   telegramClient,
 		cooldowns:        make(map[string]time.Time),
 		rankingCooldowns: make(map[string]time.Time),
 		feedbackLog:      make(map[string]models.FeedbackEntry),
-		stockClient:      client.NewStockServiceClient(cfg.StockServiceURL),
+		stockClient:      sc,
+		metrics:          m,
 		stopCleanup:      make(chan struct{}),
 		stopFeedback:     make(chan struct{}),
 		stopRetry:        make(chan struct{}),
@@ -83,7 +96,9 @@ func (s *AlertService) cleanupExpiredCooldowns() {
 			delete(s.cooldowns, key)
 		}
 	}
+	cooldownCount := float64(len(s.cooldowns))
 	s.cooldownMu.Unlock()
+	s.metrics.SetCooldownEntries(cooldownCount)
 
 	s.rankingCooldownMu.Lock()
 	for key, t := range s.rankingCooldowns {
@@ -157,11 +172,13 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		scaleInDuration := time.Duration(s.config.ScaleInCooldownMinutes) * time.Minute
 		if !s.checkCooldownWithDuration(cooldownKey, scaleInDuration) {
 			log.Printf("Skipping scale-in alert for %s %s: in scale-in cooldown period", data.Symbol, data.Signal)
+			s.metrics.IncCooldownSkipped()
 			return nil
 		}
 	} else {
 		if !s.checkCooldown(cooldownKey) {
 			log.Printf("Skipping alert for %s %s: in cooldown period", data.Symbol, data.Signal)
+			s.metrics.IncCooldownSkipped()
 			return nil
 		}
 	}
@@ -169,6 +186,7 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 	// Check quiet hours
 	if s.isQuietHours() {
 		log.Printf("Skipping alert for %s: quiet hours active", data.Symbol)
+		s.metrics.IncQuietHoursSkipped()
 		return nil
 	}
 
@@ -228,17 +246,34 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 				},
 			},
 		}
+		sendStart := time.Now()
 		if _, err := s.telegramClient.SendMessageWithKeyboard(ctx, message, keyboard); err != nil {
+			s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
+			s.metrics.IncTelegramErrors()
+			s.metrics.IncAlertSent(data.Signal, "failed")
 			return fmt.Errorf("failed to send telegram message: %w", err)
 		}
+		s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
+		s.metrics.IncAlertSent(data.Signal, "success")
 	} else {
+		sendStart := time.Now()
 		if err := s.telegramClient.SendMessage(ctx, message); err != nil {
+			s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
+			s.metrics.IncTelegramErrors()
+			s.metrics.IncAlertSent(data.Signal, "failed")
 			return fmt.Errorf("failed to send telegram message: %w", err)
 		}
+		s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
+		s.metrics.IncAlertSent(data.Signal, "success")
 	}
 
 	// Update cooldown
 	s.setCooldown(cooldownKey)
+
+	// Update cooldown entries gauge
+	s.cooldownMu.RLock()
+	s.metrics.SetCooldownEntries(float64(len(s.cooldowns)))
+	s.cooldownMu.RUnlock()
 
 	log.Printf("Sent alert for %s %s signal (confidence: %.2f)", data.Symbol, data.Signal, data.Confidence)
 	return nil
@@ -259,20 +294,26 @@ func (s *AlertService) HandleRankingEvent(ctx context.Context, event interface{}
 	// Check cooldown for this signal type
 	if !s.checkRankingCooldown(ranking.Data.SignalType) {
 		log.Printf("Skipping ranking alert for %s: in cooldown period", ranking.Data.SignalType)
+		s.metrics.IncCooldownSkipped()
 		return nil
 	}
 
 	// Check quiet hours
 	if s.isQuietHours() {
 		log.Printf("Skipping ranking alert: quiet hours active")
+		s.metrics.IncQuietHoursSkipped()
 		return nil
 	}
 
 	// Format and send the message
 	message := s.formatRankingMessage(ranking)
+	sendStart := time.Now()
 	if err := s.telegramClient.SendMessage(ctx, message); err != nil {
+		s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
+		s.metrics.IncTelegramErrors()
 		return fmt.Errorf("failed to send telegram ranking message: %w", err)
 	}
+	s.metrics.ObserveTelegramDuration(time.Since(sendStart).Seconds())
 
 	// Update cooldown
 	s.setRankingCooldown(ranking.Data.SignalType)
@@ -798,6 +839,12 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 	signal := parts[2]
 	action := parts[4] // "traded" (skipped is now the default recorded at send time)
 
+	// Whitelist-validate action to prevent injection from crafted callbacks
+	if action != "traded" && action != "skipped" {
+		log.Printf("FEEDBACK: ignoring invalid action %q for %s %s", action, symbol, signal)
+		return
+	}
+
 	entry := models.FeedbackEntry{
 		Symbol:    symbol,
 		Signal:    signal,
@@ -824,6 +871,8 @@ func (s *AlertService) handleFeedbackCallback(ctx context.Context, cb *telegram.
 		// Fallback: POST new row (unenriched — no stored ID)
 		s.stockClient.PostFeedback(ctx, symbol, signal, action, 0, nil, "", 0, nil)
 	}
+
+	s.metrics.IncFeedbackReceived(action)
 
 	log.Printf("FEEDBACK: %s %s → %s (updated from default skipped)", symbol, signal, action)
 
