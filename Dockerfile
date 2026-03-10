@@ -18,4 +18,7 @@ COPY --from=builder /healthcheck /healthcheck
 
 USER nonroot:nonroot
 
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+    CMD ["/healthcheck"]
+
 ENTRYPOINT ["/alert-service"]
