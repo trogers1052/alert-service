@@ -891,43 +891,51 @@ func (s *AlertService) retryFailedFeedback() {
 	for {
 		select {
 		case <-ticker.C:
-			if s.stockClient == nil {
-				continue
-			}
-			s.feedbackMu.RLock()
-			var retryKeys []string
-			for key, entry := range s.feedbackLog {
-				if entry.FeedbackID == 0 {
-					retryKeys = append(retryKeys, key)
-				}
-			}
-			s.feedbackMu.RUnlock()
-
-			for _, key := range retryKeys {
-				s.feedbackMu.RLock()
-				entry, ok := s.feedbackLog[key]
-				s.feedbackMu.RUnlock()
-				if !ok || entry.FeedbackID != 0 {
-					continue
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				fbID := s.stockClient.PostFeedback(ctx, entry.Symbol, entry.Signal,
-					entry.Action, 0, entry.RulesTriggered, entry.RegimeID, 0, nil)
-				cancel()
-
-				if fbID > 0 {
-					s.feedbackMu.Lock()
-					if current, exists := s.feedbackLog[key]; exists && current.FeedbackID == 0 {
-						current.FeedbackID = fbID
-						s.feedbackLog[key] = current
-					}
-					s.feedbackMu.Unlock()
-					log.Printf("FEEDBACK RETRY: %s %s persisted (id=%d)", entry.Symbol, entry.Signal, fbID)
-				}
-			}
+			s.retryFailedFeedbackOnce()
 		case <-s.stopRetry:
 			return
+		}
+	}
+}
+
+// retryFailedFeedbackOnce performs a single scan-and-retry pass over the
+// feedback log, re-POSTing any entries whose initial persistence failed
+// (FeedbackID == 0). Extracted from the ticker loop so it can be tested
+// directly without waiting for the timer.
+func (s *AlertService) retryFailedFeedbackOnce() {
+	if s.stockClient == nil {
+		return
+	}
+	s.feedbackMu.RLock()
+	var retryKeys []string
+	for key, entry := range s.feedbackLog {
+		if entry.FeedbackID == 0 {
+			retryKeys = append(retryKeys, key)
+		}
+	}
+	s.feedbackMu.RUnlock()
+
+	for _, key := range retryKeys {
+		s.feedbackMu.RLock()
+		entry, ok := s.feedbackLog[key]
+		s.feedbackMu.RUnlock()
+		if !ok || entry.FeedbackID != 0 {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		fbID := s.stockClient.PostFeedback(ctx, entry.Symbol, entry.Signal,
+			entry.Action, 0, entry.RulesTriggered, entry.RegimeID, 0, nil)
+		cancel()
+
+		if fbID > 0 {
+			s.feedbackMu.Lock()
+			if current, exists := s.feedbackLog[key]; exists && current.FeedbackID == 0 {
+				current.FeedbackID = fbID
+				s.feedbackLog[key] = current
+			}
+			s.feedbackMu.Unlock()
+			log.Printf("FEEDBACK RETRY: %s %s persisted (id=%d)", entry.Symbol, entry.Signal, fbID)
 		}
 	}
 }
