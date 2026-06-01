@@ -1,116 +1,112 @@
 # Alert Service
 
-**Language:** Go
-**Status:** Not Started
-**Priority:** Phase 3 (After Analytics)
+A Go microservice in the trading platform that turns trade **decisions** and **rankings** into actionable Telegram alerts. It consumes scored decisions from Kafka, applies a set of delivery filters (confidence, risk/reward, checklist status, cooldowns, quiet hours), formats a rich alert with the full trade plan and pre-trade checklist, and ships it to Telegram with inline **feedback buttons**. When the user taps a button, the response is persisted back to `stock-service` so the platform can later correlate signals to outcomes.
 
-## Purpose
+It is deployed to a Raspberry Pi 5 alongside the other platform services.
 
-Monitors real-time price and indicator data, evaluates alert rules, and sends notifications via Telegram/Pushover when conditions are met.
+## Role / Architecture
 
-## Responsibilities
+```
+decision-engine ──(trading.decisions)──┐
+                                        ├──► alert-service ──► Telegram (with trade plan,
+decision-engine ──(trading.rankings)────┘          │            checklist, inline buttons)
+                                                    │
+                                  button tap ◄──────┘
+                                                    │
+                                                    └──► stock-service REST API (feedback persistence)
+```
 
-- Consume events from multiple Kafka topics (prices + indicators)
-- Maintain in-memory state of current prices and indicators
-- Query alert rules from PostgreSQL
-- Evaluate alert conditions in real-time
-- Send notifications (Telegram, Pushover, SMS, Email)
-- Respect cooldown periods to prevent spam
-- Log triggered alerts to `alert_history` table
+- **Consumes (Kafka):**
+  - `trading.decisions` — per-symbol `DecisionEvent` with confidence, action (BUY/SELL/WATCH), an optional `TradePlan` (entry zone, ATR-based stop, targets, R:R) and an optional pre-trade `Checklist`.
+  - `trading.rankings` — `RankingEvent` containing the current top-N ranked setups.
+- **Produces:** nothing to Kafka. Output is Telegram messages.
+- **State:** in-memory only (cooldown tracking, pending-feedback registry). No database.
 
-## Kafka Topics
+## Features
 
-**Consumes:**
-- `stock.quotes.realtime` - Real-time price updates
-- `stock.indicators` - Technical indicator updates
-
-**Produces:**
-- `trading.alerts` - Alert trigger events (for audit/replay)
-
-## Alert Rule Types
-
-| Rule Type | Description | Example |
-|-----------|-------------|---------|
-| PRICE_TARGET | Price hits specific level | "Alert when AAPL >= $180" |
-| RSI_OVERSOLD | RSI below threshold | "Alert when RSI < 30" |
-| RSI_OVERBOUGHT | RSI above threshold | "Alert when RSI > 70" |
-| SUPPORT_BOUNCE | Price near support + RSI low | "Alert at buy zone with oversold RSI" |
-| RESISTANCE_BREAK | Price breaks resistance | "Alert when price breaks $200" |
-| VOLUME_SPIKE | Unusual volume | "Alert when volume > 2x average" |
+- **Telegram delivery** of BUY / SELL / WATCH decision alerts and periodic top-N ranking summaries.
+- **Rich formatting** — each decision alert renders the trade plan (entry, stop, targets, R:R) and the pre-trade checklist when present.
+- **Inline feedback buttons** — *Traded* / *Skipped* buttons are attached to each alert; presses are captured via Telegram callback queries and forwarded to `stock-service` for signal-to-outcome analysis (with retry on transient failures).
+- **Delivery filters:**
+  - `MIN_CONFIDENCE` floor; per-action toggles (`ALERT_ON_BUY`, `ALERT_ON_SELL`, `ALERT_ON_WATCH`, `ALERT_ON_RANKINGS`).
+  - **Minimum R:R** — BUY signals whose trade plan is below `MIN_RR_RATIO` are skipped.
+  - **Checklist gate** — decisions with a `BLOCKED` checklist status are skipped.
+  - **Cooldowns** — independent cooldowns for new signals, scale-ins, and rankings prevent spam.
+  - **Quiet hours** (timezone-aware) and a **muted-symbols** list.
+- **Operational endpoints** — `/health` and Prometheus metrics; a separate `healthcheck` binary for container health probes.
 
 ## Configuration
 
-```env
-KAFKA_BROKERS=localhost:19092
-KAFKA_CONSUMER_GROUP=alert-service
-KAFKA_PRICE_TOPIC=stock.quotes.realtime
-KAFKA_INDICATOR_TOPIC=stock.indicators
-KAFKA_ALERT_TOPIC=trading.alerts
+Configuration is via environment variables (see `.env.example`). Use placeholders — never commit real tokens.
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=trader
-DB_PASSWORD=your_db_password
-DB_NAME=trading_platform
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_BROKERS` | `localhost:19092` | Comma-separated Kafka/Redpanda brokers |
+| `KAFKA_CONSUMER_GROUP` | `alert-service` | Consumer group ID |
+| `KAFKA_DECISION_TOPIC` | `trading.decisions` | Decision events topic |
+| `KAFKA_RANKING_TOPIC` | `trading.rankings` | Ranking events topic |
+| `TELEGRAM_BOT_TOKEN` | _(required)_ | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | _(required)_ | Destination chat ID |
+| `MIN_CONFIDENCE` | `0.6` | Minimum decision confidence to alert |
+| `ALERT_ON_BUY` / `ALERT_ON_SELL` / `ALERT_ON_WATCH` | `true` / `true` / `false` | Per-action delivery toggles |
+| `ALERT_ON_RANKINGS` | `true` | Deliver top-N ranking summaries |
+| `RANKINGS_TOP_N` | `5` | Number of ranked setups per summary |
+| `MIN_RR_RATIO` | `2.0` | Minimum risk/reward for BUY alerts |
+| `COOLDOWN_MINUTES` | `30` | New-signal cooldown per symbol |
+| `SCALE_IN_COOLDOWN_MINUTES` | `5` | Scale-in cooldown |
+| `RANKING_COOLDOWN_MINUTES` | `60` | Ranking-summary cooldown |
+| `ENABLE_QUIET_HOURS` | `false` | Suppress alerts during quiet hours |
+| `QUIET_HOURS_START` / `QUIET_HOURS_END` | `22` / `7` | Quiet-hours window (hour of day) |
+| `QUIET_HOURS_TIMEZONE` | `America/New_York` | Timezone for quiet hours |
+| `MUTED_SYMBOLS` | _(empty)_ | Comma-separated symbols to suppress |
+| `STOCK_SERVICE_URL` | `http://stock-service:8081` | Feedback persistence endpoint |
+| `STOCK_SERVICE_API_KEY` | _(empty)_ | API key for `stock-service` (optional) |
 
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-PUSHOVER_USER_KEY=your_user_key
-PUSHOVER_API_TOKEN=your_api_token
-```
+## Running
 
-## Data Flow
-
-```
-Kafka (stock.quotes.realtime) ──┐
-                                ├──► Alert Service
-Kafka (stock.indicators) ───────┘         │
-                                          ├─► Evaluate Rules
-                                          │   (from PostgreSQL)
-                                          │
-                                          ├─► Check Cooldowns
-                                          │
-                                          └─► Send Notifications
-                                              - Telegram
-                                              - Pushover
-                                              - Log to alert_history
-```
-
-## Alert Message Format
-
-```
-🚨 ALERT: SLV Buy Zone
-
-Symbol: SLV
-Price: $28.45
-RSI: 27.3
-
-Condition: Price in buy zone ($28-$28.50) with RSI < 30
-
-Action: Consider entry per your trading plan
-```
-
-## Build & Run
+**Local:**
 
 ```bash
-# Build
-go build -o bin/alert-service ./cmd/alerts
-
-# Run
-./bin/alert-service
-
-# Docker
-docker build -t alert-service .
-docker run --network trading-network alert-service
+cp .env.example .env   # fill in TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+go run ./cmd/alerts
 ```
 
-## TODO
+**Docker:**
 
-- [ ] Implement multi-topic Kafka consumer
-- [ ] Implement alert rule evaluation engine
-- [ ] Implement Telegram notification client
-- [ ] Implement Pushover notification client
-- [ ] Add cooldown tracking
-- [ ] Add alert history logging
-- [ ] Add health check endpoint
-- [ ] Add graceful shutdown
+```bash
+docker build -t alert-service .
+docker run --env-file .env alert-service
+```
+
+CI builds and publishes a multi-arch image (`linux/amd64,linux/arm64`) to `ghcr.io/trogers1052/alert-service`.
+
+## Testing
+
+```bash
+go test ./...            # unit tests
+go test -race -cover ./... # with race detector and coverage
+```
+
+Integration tests use the shared [`trading-testkit`](https://github.com/trogers1052/trading-testkit) (Redpanda/testcontainers); the Kafka contract test validates the decision/ranking event schemas.
+
+## Project layout
+
+```
+cmd/
+  alerts/        # service entry point + metrics
+  healthcheck/   # container health-probe binary
+internal/
+  config/        # env-based configuration
+  kafka/         # decision/ranking consumer (+ contract test)
+  models/        # event, trade-plan, checklist, feedback types
+  service/       # filtering, formatting, cooldowns, feedback loop
+  telegram/      # Telegram client + inline keyboard / callback handling
+  client/        # stock-service feedback client
+  metrics/       # Prometheus metrics
+```
+
+---
+
+## Built with Claude Code
+
+A large portion of this project — implementation, tests, and documentation — was written in pair-programming sessions with [Claude Code](https://claude.com/claude-code), Anthropic's agentic command-line tool.
