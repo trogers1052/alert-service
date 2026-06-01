@@ -50,7 +50,7 @@ KAFKA_ALERT_TOPIC=trading.alerts
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=trader
-DB_PASSWORD=trader5
+DB_PASSWORD=your_db_password
 DB_NAME=trading_platform
 
 TELEGRAM_BOT_TOKEN=your_bot_token
