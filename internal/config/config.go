@@ -20,20 +20,20 @@ type Config struct {
 	TelegramChatID   int64
 
 	// Alert settings
-	MinConfidence     float64 // Minimum confidence to send alert
-	AlertOnBuy        bool    // Send alerts for BUY signals
-	AlertOnSell       bool    // Send alerts for SELL signals
-	AlertOnWatch      bool    // Send alerts for WATCH signals
-	AlertOnRankings        bool // Send daily ranking summaries
-	RankingsTopN           int  // Number of top stocks to include in ranking alerts
-	MinRRRatio               float64 // Minimum R:R ratio to send BUY alert (0 = disabled)
-	CooldownMinutes          int     // Cooldown between alerts for same symbol
-	ScaleInCooldownMinutes   int     // Shorter cooldown for scale-in signals
-	RankingCooldownMinutes   int     // Cooldown between ranking alerts for same signal type
-	QuietHoursStart    int    // Hour to start quiet hours (0-23), in QuietHoursTimezone
-	QuietHoursEnd      int    // Hour to end quiet hours (0-23), in QuietHoursTimezone
-	EnableQuietHours   bool   // Whether to enable quiet hours
-	QuietHoursTimezone string // IANA timezone name for quiet hours (e.g. "America/New_York")
+	MinConfidence          float64 // Minimum confidence to send alert
+	AlertOnBuy             bool    // Send alerts for BUY signals
+	AlertOnSell            bool    // Send alerts for SELL signals
+	AlertOnWatch           bool    // Send alerts for WATCH signals
+	AlertOnRankings        bool    // Send daily ranking summaries
+	RankingsTopN           int     // Number of top stocks to include in ranking alerts
+	MinRRRatio             float64 // Minimum R:R ratio to send BUY alert (0 = disabled)
+	CooldownMinutes        int     // Cooldown between alerts for same symbol
+	ScaleInCooldownMinutes int     // Shorter cooldown for scale-in signals
+	RankingCooldownMinutes int     // Cooldown between ranking alerts for same signal type
+	QuietHoursStart        int     // Hour to start quiet hours (0-23), in QuietHoursTimezone
+	QuietHoursEnd          int     // Hour to end quiet hours (0-23), in QuietHoursTimezone
+	EnableQuietHours       bool    // Whether to enable quiet hours
+	QuietHoursTimezone     string  // IANA timezone name for quiet hours (e.g. "America/New_York")
 
 	// Symbol muting — context/indicator symbols that should never trigger alerts
 	MutedSymbols map[string]bool
@@ -57,20 +57,20 @@ func Load() (*Config, error) {
 		TelegramChatID:   getEnvInt64("TELEGRAM_CHAT_ID", 0),
 
 		// Alert settings
-		MinConfidence:    getEnvFloat("MIN_CONFIDENCE", 0.6),
-		AlertOnBuy:       getEnvBool("ALERT_ON_BUY", true),
-		AlertOnSell:      getEnvBool("ALERT_ON_SELL", true),
-		AlertOnWatch:     getEnvBool("ALERT_ON_WATCH", false),
-		AlertOnRankings:  getEnvBool("ALERT_ON_RANKINGS", true),
+		MinConfidence:          getEnvFloat("MIN_CONFIDENCE", 0.6),
+		AlertOnBuy:             getEnvBool("ALERT_ON_BUY", true),
+		AlertOnSell:            getEnvBool("ALERT_ON_SELL", true),
+		AlertOnWatch:           getEnvBool("ALERT_ON_WATCH", false),
+		AlertOnRankings:        getEnvBool("ALERT_ON_RANKINGS", true),
 		RankingsTopN:           getEnvInt("RANKINGS_TOP_N", 5),
 		MinRRRatio:             getEnvFloat("MIN_RR_RATIO", 2.0),
 		CooldownMinutes:        getEnvInt("COOLDOWN_MINUTES", 30),
 		ScaleInCooldownMinutes: getEnvInt("SCALE_IN_COOLDOWN_MINUTES", 5),
 		RankingCooldownMinutes: getEnvInt("RANKING_COOLDOWN_MINUTES", 60),
-		QuietHoursStart:    getEnvInt("QUIET_HOURS_START", 22), // 10 PM
-		QuietHoursEnd:      getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
-		EnableQuietHours:   getEnvBool("ENABLE_QUIET_HOURS", false),
-		QuietHoursTimezone: getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
+		QuietHoursStart:        getEnvInt("QUIET_HOURS_START", 22), // 10 PM
+		QuietHoursEnd:          getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
+		EnableQuietHours:       getEnvBool("ENABLE_QUIET_HOURS", false),
+		QuietHoursTimezone:     getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
 
 		// Symbol muting
 		MutedSymbols: getEnvSymbolSet("MUTED_SYMBOLS"),

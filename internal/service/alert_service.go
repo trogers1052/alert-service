@@ -23,19 +23,19 @@ type AlertService struct {
 	cooldowns      map[string]time.Time // symbol -> last alert time
 	cooldownMu     sync.RWMutex
 
-	rankingCooldowns   map[string]time.Time // signal type -> last ranking alert time
-	rankingCooldownMu  sync.RWMutex
+	rankingCooldowns  map[string]time.Time // signal type -> last ranking alert time
+	rankingCooldownMu sync.RWMutex
 
 	// Feedback tracking — records whether user acted on signals
-	feedbackLog   map[string]models.FeedbackEntry
-	feedbackMu    sync.RWMutex
-	stockClient   *client.StockServiceClient    // PostgreSQL persistence via stock-service (nil if unavailable)
+	feedbackLog map[string]models.FeedbackEntry
+	feedbackMu  sync.RWMutex
+	stockClient *client.StockServiceClient // PostgreSQL persistence via stock-service (nil if unavailable)
 
-	metrics        metrics.Recorder
+	metrics metrics.Recorder
 
-	stopCleanup    chan struct{}
-	stopFeedback   chan struct{}
-	stopRetry      chan struct{}
+	stopCleanup  chan struct{}
+	stopFeedback chan struct{}
+	stopRetry    chan struct{}
 }
 
 // NewAlertService creates a new alert service.

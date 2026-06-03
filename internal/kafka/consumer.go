@@ -32,15 +32,15 @@ type MessageHandler func(ctx context.Context, event interface{}) error
 
 // Consumer wraps Sarama consumer group for Kafka consumption
 type Consumer struct {
-	client           sarama.ConsumerGroup
-	decisionTopic    string
-	rankingTopic     string
-	decisionHandler  MessageHandler
-	rankingHandler   MessageHandler
-	ready            chan bool
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	metrics          metrics.Recorder
+	client          sarama.ConsumerGroup
+	decisionTopic   string
+	rankingTopic    string
+	decisionHandler MessageHandler
+	rankingHandler  MessageHandler
+	ready           chan bool
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	metrics         metrics.Recorder
 }
 
 // NewConsumer creates a new Kafka consumer.

@@ -56,9 +56,9 @@ type SendMessageRequest struct {
 
 // SendMessageResponse represents a Telegram API response
 type SendMessageResponse struct {
-	OK          bool            `json:"ok"`
-	Description string          `json:"description,omitempty"`
-	Result      *MessageResult  `json:"result,omitempty"`
+	OK          bool           `json:"ok"`
+	Description string         `json:"description,omitempty"`
+	Result      *MessageResult `json:"result,omitempty"`
 }
 
 // MessageResult contains the sent message metadata
@@ -68,8 +68,8 @@ type MessageResult struct {
 
 // CallbackQuery represents an incoming callback query from an inline button press
 type CallbackQuery struct {
-	ID      string          `json:"id"`
-	Data    string          `json:"data"`
+	ID      string           `json:"id"`
+	Data    string           `json:"data"`
 	Message *CallbackMessage `json:"message,omitempty"`
 }
 
@@ -83,7 +83,7 @@ type CallbackMessage struct {
 
 // GetUpdatesResponse represents the Telegram getUpdates API response
 type GetUpdatesResponse struct {
-	OK     bool `json:"ok"`
+	OK     bool     `json:"ok"`
 	Result []Update `json:"result"`
 }
 

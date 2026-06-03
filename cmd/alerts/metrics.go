@@ -72,16 +72,20 @@ type promRecorder struct{}
 
 var _ metrics.Recorder = promRecorder{}
 
-func (promRecorder) IncAlertSent(signalType, status string)  { alertsSent.WithLabelValues(signalType, status).Inc() }
+func (promRecorder) IncAlertSent(signalType, status string) {
+	alertsSent.WithLabelValues(signalType, status).Inc()
+}
 func (promRecorder) IncKafkaConsumed(topic string)           { kafkaConsumed.WithLabelValues(topic).Inc() }
 func (promRecorder) IncCooldownSkipped()                     { cooldownSkipped.Inc() }
 func (promRecorder) IncQuietHoursSkipped()                   { quietHoursSkipped.Inc() }
 func (promRecorder) ObserveTelegramDuration(seconds float64) { telegramDuration.Observe(seconds) }
 func (promRecorder) IncTelegramErrors()                      { telegramErrors.Inc() }
-func (promRecorder) IncFeedbackReceived(action string)       { feedbackReceived.WithLabelValues(action).Inc() }
-func (promRecorder) IncFeedbackPostErrors()                  { feedbackPostErrors.Inc() }
-func (promRecorder) SetCooldownEntries(n float64)            { cooldownEntries.Set(n) }
-func (promRecorder) IncDeadLetters()                         { deadLetters.Inc() }
+func (promRecorder) IncFeedbackReceived(action string) {
+	feedbackReceived.WithLabelValues(action).Inc()
+}
+func (promRecorder) IncFeedbackPostErrors()       { feedbackPostErrors.Inc() }
+func (promRecorder) SetCooldownEntries(n float64) { cooldownEntries.Set(n) }
+func (promRecorder) IncDeadLetters()              { deadLetters.Inc() }
 
 // newPromRecorder returns a metrics.Recorder backed by Prometheus.
 func newPromRecorder() metrics.Recorder {

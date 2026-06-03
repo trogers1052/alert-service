@@ -518,11 +518,11 @@ func TestFormatDecisionMessage_BuyWithTradePlan(t *testing.T) {
 
 	assert.Contains(t, msg, "BUY Signal: AAPL")
 	assert.Contains(t, msg, "Reason:")
-	assert.Contains(t, msg, "85%") // confidence
+	assert.Contains(t, msg, "85%")    // confidence
 	assert.Contains(t, msg, "$49.50") // entry zone low
 	assert.Contains(t, msg, "$50.50") // entry zone high
 	assert.Contains(t, msg, "$47.00") // stop
-	assert.Contains(t, msg, "ATR") // stop method
+	assert.Contains(t, msg, "ATR")    // stop method
 	assert.Contains(t, msg, "$56.00") // target 1
 	assert.Contains(t, msg, "$62.00") // target 2
 	assert.Contains(t, msg, "17 shares")
@@ -1131,9 +1131,9 @@ func TestHandleFeedbackCallback_TradedOverridesDefaultSkipped(t *testing.T) {
 	// Simulate the default "skipped" recorded at send time
 	s.feedbackMu.Lock()
 	s.feedbackLog["GOOG:BUY:130000"] = models.FeedbackEntry{
-		Symbol: "GOOG",
-		Signal: "BUY",
-		Action: "skipped",
+		Symbol:    "GOOG",
+		Signal:    "BUY",
+		Action:    "skipped",
 		Timestamp: time.Now(),
 	}
 	s.feedbackMu.Unlock()
@@ -1157,8 +1157,8 @@ func TestHandleFeedbackCallback_InvalidFormat(t *testing.T) {
 
 	tests := []string{
 		"not-feedback-data",
-		"fb:AAPL",            // too few parts
-		"fb:AAPL:BUY",        // too few parts
+		"fb:AAPL",              // too few parts
+		"fb:AAPL:BUY",          // too few parts
 		"xx:AAPL:BUY:1:traded", // wrong prefix
 	}
 

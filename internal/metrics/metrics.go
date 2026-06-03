@@ -42,13 +42,13 @@ type Recorder interface {
 // Prometheus metrics are wired (e.g. in tests).
 type Nop struct{}
 
-func (Nop) IncAlertSent(string, string)       {}
-func (Nop) IncKafkaConsumed(string)            {}
-func (Nop) IncCooldownSkipped()                {}
-func (Nop) IncQuietHoursSkipped()              {}
-func (Nop) ObserveTelegramDuration(float64)    {}
-func (Nop) IncTelegramErrors()                 {}
-func (Nop) IncFeedbackReceived(string)         {}
-func (Nop) IncFeedbackPostErrors()             {}
-func (Nop) SetCooldownEntries(float64)         {}
-func (Nop) IncDeadLetters()                    {}
+func (Nop) IncAlertSent(string, string)     {}
+func (Nop) IncKafkaConsumed(string)         {}
+func (Nop) IncCooldownSkipped()             {}
+func (Nop) IncQuietHoursSkipped()           {}
+func (Nop) ObserveTelegramDuration(float64) {}
+func (Nop) IncTelegramErrors()              {}
+func (Nop) IncFeedbackReceived(string)      {}
+func (Nop) IncFeedbackPostErrors()          {}
+func (Nop) SetCooldownEntries(float64)      {}
+func (Nop) IncDeadLetters()                 {}
