@@ -23,14 +23,14 @@ type fakeSession struct {
 	marked int
 }
 
-func (f *fakeSession) Claims() map[string][]int32                   { return nil }
-func (f *fakeSession) MemberID() string                             { return "m" }
-func (f *fakeSession) GenerationID() int32                          { return 1 }
-func (f *fakeSession) MarkOffset(string, int32, int64, string)      {}
-func (f *fakeSession) Commit()                                      {}
-func (f *fakeSession) ResetOffset(string, int32, int64, string)     {}
-func (f *fakeSession) MarkMessage(*sarama.ConsumerMessage, string)  { f.marked++ }
-func (f *fakeSession) Context() context.Context                     { return f.ctx }
+func (f *fakeSession) Claims() map[string][]int32                  { return nil }
+func (f *fakeSession) MemberID() string                            { return "m" }
+func (f *fakeSession) GenerationID() int32                         { return 1 }
+func (f *fakeSession) MarkOffset(string, int32, int64, string)     {}
+func (f *fakeSession) Commit()                                     {}
+func (f *fakeSession) ResetOffset(string, int32, int64, string)    {}
+func (f *fakeSession) MarkMessage(*sarama.ConsumerMessage, string) { f.marked++ }
+func (f *fakeSession) Context() context.Context                    { return f.ctx }
 
 type fakeClaim struct {
 	ch chan *sarama.ConsumerMessage
@@ -61,7 +61,7 @@ func newTestConsumer() *Consumer {
 // the consumer's metric calls observable if needed later).
 type nopMetrics struct{}
 
-func (nopMetrics) IncAlertSent(string, string)    {}
+func (nopMetrics) IncAlertSent(string, string)     {}
 func (nopMetrics) IncKafkaConsumed(string)         {}
 func (nopMetrics) IncCooldownSkipped()             {}
 func (nopMetrics) IncQuietHoursSkipped()           {}
@@ -75,9 +75,9 @@ func (nopMetrics) IncDeadLetters()                 {}
 func validDecisionRaw(t *testing.T) []byte {
 	t.Helper()
 	ev := models.DecisionEvent{
-		EventType:     "DECISION",
+		EventType:     models.EventTypeDecision,
 		Source:        "decision-engine",
-		SchemaVersion: "1.0",
+		SchemaVersion: "1.2",
 		Timestamp:     time.Now().UTC(),
 		Data: models.DecisionData{
 			Symbol:     "AAPL",

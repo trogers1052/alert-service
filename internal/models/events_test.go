@@ -15,6 +15,8 @@ import (
 
 func TestValidate_ValidBuyEvent(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     SignalBuy,
@@ -26,6 +28,8 @@ func TestValidate_ValidBuyEvent(t *testing.T) {
 
 func TestValidate_ValidSellEvent(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "GOOG",
 			Signal:     SignalSell,
@@ -37,6 +41,8 @@ func TestValidate_ValidSellEvent(t *testing.T) {
 
 func TestValidate_ValidWatchEvent(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "TSLA",
 			Signal:     SignalWatch,
@@ -46,8 +52,59 @@ func TestValidate_ValidWatchEvent(t *testing.T) {
 	assert.NoError(t, e.Validate())
 }
 
+// TestValidate_WrongEventType asserts Validate rejects an event whose
+// event_type does not match the canonical producer value. This is the guard
+// against silent cross-repo schema drift.
+func TestValidate_WrongEventType(t *testing.T) {
+	e := &DecisionEvent{
+		EventType:     "DECISION", // legacy/wrong value
+		SchemaVersion: "1.2",
+		Data: DecisionData{
+			Symbol:     "AAPL",
+			Signal:     SignalBuy,
+			Confidence: 0.85,
+		},
+	}
+	err := e.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event_type")
+}
+
+// TestValidate_MissingSchemaVersion asserts schema_version must be present
+// (lenient: any non-empty value is accepted for forward-compatibility).
+func TestValidate_MissingSchemaVersion(t *testing.T) {
+	e := &DecisionEvent{
+		EventType: EventTypeDecision,
+		Data: DecisionData{
+			Symbol:     "AAPL",
+			Signal:     SignalBuy,
+			Confidence: 0.85,
+		},
+	}
+	err := e.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "schema_version")
+}
+
+// TestValidate_LenientSchemaVersion asserts a future schema_version is still
+// accepted (forward-compatible) as long as event_type is canonical.
+func TestValidate_LenientSchemaVersion(t *testing.T) {
+	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "9.9",
+		Data: DecisionData{
+			Symbol:     "AAPL",
+			Signal:     SignalBuy,
+			Confidence: 0.85,
+		},
+	}
+	assert.NoError(t, e.Validate())
+}
+
 func TestValidate_MissingSymbol(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "",
 			Signal:     SignalBuy,
@@ -61,6 +118,8 @@ func TestValidate_MissingSymbol(t *testing.T) {
 
 func TestValidate_SymbolTooLong(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "VERYLONGSYMB", // 12 chars > MaxSymbolLength(10)
 			Signal:     SignalBuy,
@@ -74,6 +133,8 @@ func TestValidate_SymbolTooLong(t *testing.T) {
 
 func TestValidate_SymbolExactlyMaxLength(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "ABCDEFGHIJ", // exactly 10 chars
 			Signal:     SignalBuy,
@@ -85,6 +146,8 @@ func TestValidate_SymbolExactlyMaxLength(t *testing.T) {
 
 func TestValidate_MissingSignal(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     "",
@@ -98,6 +161,8 @@ func TestValidate_MissingSignal(t *testing.T) {
 
 func TestValidate_InvalidSignal(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     "HOLD",
@@ -111,6 +176,8 @@ func TestValidate_InvalidSignal(t *testing.T) {
 
 func TestValidate_ConfidenceNegative(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     SignalBuy,
@@ -124,6 +191,8 @@ func TestValidate_ConfidenceNegative(t *testing.T) {
 
 func TestValidate_ConfidenceAboveOne(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     SignalBuy,
@@ -137,6 +206,8 @@ func TestValidate_ConfidenceAboveOne(t *testing.T) {
 
 func TestValidate_ConfidenceBoundaryZero(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     SignalBuy,
@@ -148,6 +219,8 @@ func TestValidate_ConfidenceBoundaryZero(t *testing.T) {
 
 func TestValidate_ConfidenceBoundaryOne(t *testing.T) {
 	e := &DecisionEvent{
+		EventType:     EventTypeDecision,
+		SchemaVersion: "1.2",
 		Data: DecisionData{
 			Symbol:     "AAPL",
 			Signal:     SignalBuy,
@@ -155,6 +228,40 @@ func TestValidate_ConfidenceBoundaryOne(t *testing.T) {
 		},
 	}
 	assert.NoError(t, e.Validate())
+}
+
+// ---------------------------------------------------------------------------
+// RankingEvent.Validate
+// ---------------------------------------------------------------------------
+
+func TestRankingValidate_Valid(t *testing.T) {
+	e := &RankingEvent{
+		EventType:     EventTypeRanking,
+		SchemaVersion: "1.0",
+		Data:          RankingData{SignalType: SignalBuy, TotalSymbols: 3},
+	}
+	assert.NoError(t, e.Validate())
+}
+
+func TestRankingValidate_WrongEventType(t *testing.T) {
+	e := &RankingEvent{
+		EventType:     "RANKING", // legacy/wrong value
+		SchemaVersion: "1.0",
+		Data:          RankingData{SignalType: SignalBuy},
+	}
+	err := e.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event_type")
+}
+
+func TestRankingValidate_MissingSchemaVersion(t *testing.T) {
+	e := &RankingEvent{
+		EventType: EventTypeRanking,
+		Data:      RankingData{SignalType: SignalBuy},
+	}
+	err := e.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "schema_version")
 }
 
 // ---------------------------------------------------------------------------

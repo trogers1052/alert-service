@@ -32,7 +32,7 @@ func TestConsumer_EndToEnd(t *testing.T) {
 	defer producer.Close()
 
 	dec := models.DecisionEvent{
-		EventType: "DECISION", Source: "decision-engine", SchemaVersion: "1.0",
+		EventType: models.EventTypeDecision, Source: "decision-engine", SchemaVersion: "1.2",
 		Timestamp: time.Now().UTC(),
 		Data:      models.DecisionData{Symbol: "AAPL", Signal: "BUY", Confidence: 0.9},
 	}

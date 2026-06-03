@@ -18,9 +18,9 @@ func TestContract_DecisionEvent_Consumer(t *testing.T) {
 	err := json.Unmarshal(raw, &got)
 	require.NoError(t, err, "failed to unmarshal decision_event.json into models.DecisionEvent")
 
-	assert.Equal(t, "DECISION", got.EventType)
+	assert.Equal(t, "DECISION_UPDATE", got.EventType)
 	assert.Equal(t, "decision-engine", got.Source)
-	assert.Equal(t, "1.0", got.SchemaVersion)
+	assert.Equal(t, "1.2", got.SchemaVersion)
 	assert.False(t, got.Timestamp.IsZero(), "Timestamp should not be zero")
 
 	assert.Equal(t, "AAPL", got.Data.Symbol)
@@ -47,7 +47,7 @@ func TestContract_RankingEvent_Consumer(t *testing.T) {
 	err := json.Unmarshal(raw, &got)
 	require.NoError(t, err, "failed to unmarshal ranking_event.json into models.RankingEvent")
 
-	assert.Equal(t, "RANKING", got.EventType)
+	assert.Equal(t, "RANKING_UPDATE", got.EventType)
 	assert.Equal(t, "decision-engine", got.Source)
 
 	assert.Equal(t, "BUY", got.Data.SignalType)

@@ -15,13 +15,20 @@ var ValidSignalTypes = map[string]bool{
 // MaxSymbolLength is the maximum allowed length for a ticker symbol.
 const MaxSymbolLength = 10
 
+// Event type constants. These are the canonical values emitted by the
+// decision-engine producer and must match exactly for an event to validate.
+const (
+	EventTypeDecision = "DECISION_UPDATE"
+	EventTypeRanking  = "RANKING_UPDATE"
+)
+
 // DecisionEvent represents a trading decision from the decision-engine
 type DecisionEvent struct {
-	EventType     string        `json:"event_type"`
-	Source        string        `json:"source"`
-	SchemaVersion string        `json:"schema_version"`
-	Timestamp     time.Time     `json:"timestamp"`
-	Data          DecisionData  `json:"data"`
+	EventType     string       `json:"event_type"`
+	Source        string       `json:"source"`
+	SchemaVersion string       `json:"schema_version"`
+	Timestamp     time.Time    `json:"timestamp"`
+	Data          DecisionData `json:"data"`
 }
 
 // TierData contains tier ranking metadata from backtesting validation
@@ -52,6 +59,18 @@ type DecisionData struct {
 // within acceptable ranges. It returns a descriptive error for the first
 // violation found, or nil when the message is well-formed.
 func (e *DecisionEvent) Validate() error {
+	// EventType: must match the canonical producer value exactly. This guards
+	// against silent cross-repo schema drift.
+	if e.EventType != EventTypeDecision {
+		return fmt.Errorf("invalid event_type %q: expected %q", e.EventType, EventTypeDecision)
+	}
+
+	// SchemaVersion: lenient (forward-compatible). Only require it be present;
+	// do not hard-reject on a specific version.
+	if e.SchemaVersion == "" {
+		return fmt.Errorf("missing required field: schema_version")
+	}
+
 	d := e.Data
 
 	// Symbol: required, non-empty, max 10 characters
@@ -80,19 +99,19 @@ func (e *DecisionEvent) Validate() error {
 
 // Checklist holds the pre-trade checklist evaluation result
 type Checklist struct {
-	StopLossDefined         bool    `json:"stop_loss_defined"`
-	PositionSizedCorrectly  bool    `json:"position_sized_correctly"`
-	RRRatioAcceptable       bool    `json:"rr_ratio_acceptable"`
-	NoEarningsImminent      bool    `json:"no_earnings_imminent"`
-	RegimeCompatible        bool    `json:"regime_compatible"`
-	AllChecksPassed         bool    `json:"all_checks_passed"`
-	Status                  string  `json:"status"` // "GO" | "REVIEW" | "BLOCKED"
-	EarningsDate            *string `json:"earnings_date,omitempty"`
-	EarningsDaysAway        *int    `json:"earnings_days_away,omitempty"`
-	EarningsVerified        *bool   `json:"earnings_verified,omitempty"`
-	RegimeID                string  `json:"regime_id"`
-	RiskPct                 float64 `json:"risk_pct"`
-	RRRatio                 float64 `json:"rr_ratio"`
+	StopLossDefined        bool    `json:"stop_loss_defined"`
+	PositionSizedCorrectly bool    `json:"position_sized_correctly"`
+	RRRatioAcceptable      bool    `json:"rr_ratio_acceptable"`
+	NoEarningsImminent     bool    `json:"no_earnings_imminent"`
+	RegimeCompatible       bool    `json:"regime_compatible"`
+	AllChecksPassed        bool    `json:"all_checks_passed"`
+	Status                 string  `json:"status"` // "GO" | "REVIEW" | "BLOCKED"
+	EarningsDate           *string `json:"earnings_date,omitempty"`
+	EarningsDaysAway       *int    `json:"earnings_days_away,omitempty"`
+	EarningsVerified       *bool   `json:"earnings_verified,omitempty"`
+	RegimeID               string  `json:"regime_id"`
+	RiskPct                float64 `json:"risk_pct"`
+	RRRatio                float64 `json:"rr_ratio"`
 }
 
 // TradePlan contains entry/stop/target details for a trade
@@ -127,9 +146,9 @@ type TradePlan struct {
 	GoalYears            *float64 `json:"goal_years,omitempty"`
 	ExpectedAnnualReturn *float64 `json:"expected_annual_return,omitempty"`
 	InvalidationPrice    float64  `json:"invalidation_price"`
-	PlanValid        bool     `json:"plan_valid"`
-	RRWarning        *string  `json:"rr_warning,omitempty"`
-	Warnings         []string `json:"warnings"`
+	PlanValid            bool     `json:"plan_valid"`
+	RRWarning            *string  `json:"rr_warning,omitempty"`
+	Warnings             []string `json:"warnings"`
 }
 
 // RiskAssessment contains risk engine evaluation results
@@ -154,11 +173,25 @@ type RuleResult struct {
 
 // RankingEvent represents a ranking update from the decision-engine
 type RankingEvent struct {
-	EventType     string       `json:"event_type"`
-	Source        string       `json:"source"`
-	SchemaVersion string       `json:"schema_version"`
-	Timestamp     time.Time    `json:"timestamp"`
-	Data          RankingData  `json:"data"`
+	EventType     string      `json:"event_type"`
+	Source        string      `json:"source"`
+	SchemaVersion string      `json:"schema_version"`
+	Timestamp     time.Time   `json:"timestamp"`
+	Data          RankingData `json:"data"`
+}
+
+// Validate checks that a RankingEvent has the canonical event_type and a
+// non-empty schema_version. Like DecisionEvent.Validate it is strict on
+// event_type (guards against silent schema drift) but lenient on
+// schema_version (forward-compatible).
+func (e *RankingEvent) Validate() error {
+	if e.EventType != EventTypeRanking {
+		return fmt.Errorf("invalid event_type %q: expected %q", e.EventType, EventTypeRanking)
+	}
+	if e.SchemaVersion == "" {
+		return fmt.Errorf("missing required field: schema_version")
+	}
+	return nil
 }
 
 // RankingData contains the ranking information
@@ -190,7 +223,7 @@ const (
 
 // FeedbackAction represents user response to an alert
 const (
-	FeedbackTraded = "traded"
+	FeedbackTraded  = "traded"
 	FeedbackSkipped = "skipped"
 )
 
