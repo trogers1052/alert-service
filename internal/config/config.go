@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/trogers1052/trading-go-commons/env"
 )
@@ -47,7 +46,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		// Kafka
-		KafkaBrokers:       strings.Split(env.String("KAFKA_BROKERS", "localhost:19092"), ","),
+		KafkaBrokers:       env.StringSliceRaw("KAFKA_BROKERS", []string{"localhost:19092"}, ","),
 		KafkaConsumerGroup: env.String("KAFKA_CONSUMER_GROUP", "alert-service"),
 		KafkaDecisionTopic: env.String("KAFKA_DECISION_TOPIC", "trading.decisions"),
 		KafkaRankingTopic:  env.String("KAFKA_RANKING_TOPIC", "trading.rankings"),
