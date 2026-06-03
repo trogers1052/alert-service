@@ -13,7 +13,7 @@ import (
 	"github.com/trogers1052/alert-service/internal/client"
 	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
-	"github.com/trogers1052/alert-service/internal/telegram"
+	"github.com/trogers1052/trading-go-commons/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -57,8 +57,7 @@ func TestNewAlertService_AndClose(t *testing.T) {
 	}))
 	defer tgSrv.Close()
 
-	tc := telegram.NewClient("test-token", 1)
-	tc.SetHTTPClientForTest(&http.Client{Transport: &redirectTransport{target: tgSrv.URL}})
+	tc := telegram.NewClient("test-token", 1, telegram.WithHTTPClient(&http.Client{Transport: &redirectTransport{target: tgSrv.URL}}))
 
 	cfg := newTestConfig()
 	cfg.StockServiceURL = "" // no stock client
@@ -77,8 +76,7 @@ func TestNewAlertService_NilMetricsDefaults(t *testing.T) {
 	}))
 	defer tgSrv.Close()
 
-	tc := telegram.NewClient("test-token", 1)
-	tc.SetHTTPClientForTest(&http.Client{Transport: &redirectTransport{target: tgSrv.URL}})
+	tc := telegram.NewClient("test-token", 1, telegram.WithHTTPClient(&http.Client{Transport: &redirectTransport{target: tgSrv.URL}}))
 
 	cfg := newTestConfig()
 	cfg.StockServiceURL = "http://stock-service.local" // exercises stock client SetMetrics branch
@@ -97,8 +95,7 @@ func TestNewAlertService_NilMetricsDefaults(t *testing.T) {
 // both point at the given test server URL.
 func newServiceWithStock(t *testing.T, serverURL string) *AlertService {
 	t.Helper()
-	tc := telegram.NewClient("test-token", 12345)
-	tc.SetHTTPClientForTest(&http.Client{Transport: &redirectTransport{target: serverURL}})
+	tc := telegram.NewClient("test-token", 12345, telegram.WithHTTPClient(&http.Client{Transport: &redirectTransport{target: serverURL}}))
 
 	sc := client.NewStockServiceClient(serverURL, "")
 	sc.SetMetrics(metrics.Nop{})

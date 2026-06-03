@@ -3,16 +3,14 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/trogers1052/alert-service/internal/config"
 	"github.com/trogers1052/alert-service/internal/kafka"
 	"github.com/trogers1052/alert-service/internal/service"
-	"github.com/trogers1052/alert-service/internal/telegram"
+	"github.com/trogers1052/trading-go-commons/httpserver"
+	"github.com/trogers1052/trading-go-commons/telegram"
 )
 
 func main() {
@@ -25,20 +23,10 @@ func main() {
 	if healthPort == "" {
 		healthPort = "8080"
 	}
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok")) //nolint:errcheck
-	})
-	healthServer := &http.Server{
-		Addr:              ":" + healthPort,
-		Handler:           healthMux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      5 * time.Second,
-	}
+	healthServer := httpserver.NewHealthServer(":" + healthPort)
+	healthErrCh := healthServer.Start()
 	go func() {
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := <-healthErrCh; err != nil {
 			log.Printf("Health server error: %v", err)
 		}
 	}()
@@ -87,8 +75,10 @@ func main() {
 	consumer.SetDecisionHandler(alertService.HandleDecisionEvent)
 	consumer.SetRankingHandler(alertService.HandleRankingEvent)
 
-	// Create context with cancellation — this propagates shutdown to all goroutines
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a context cancelled on SIGINT/SIGTERM — this propagates shutdown to
+	// all goroutines (including the Kafka consumer loop).
+	ctx, cancel := httpserver.SignalContext()
+	defer cancel()
 
 	// Start consumer
 	if err := consumer.Start(ctx); err != nil {
@@ -104,22 +94,18 @@ func main() {
 		log.Printf("Warning: failed to send startup notification: %v", err)
 	}
 
-	// Wait for shutdown signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigChan
+	// Wait for shutdown signal (ctx is cancelled on SIGINT/SIGTERM)
+	<-ctx.Done()
 
-	log.Printf("Received signal %v, shutting down alert-service...", sig)
+	log.Printf("Received shutdown signal, shutting down alert-service...")
 
-	// Stop accepting new OS signals
-	signal.Stop(sigChan)
+	// 1. Cancel the main context — signals all goroutines (including the Kafka
+	// consumer loop) to stop and stops intercepting OS signals.
+	cancel()
 
 	// Create a timeout context for the entire shutdown sequence
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-
-	// 1. Cancel the main context — signals all goroutines (including Kafka consumer loop) to stop
-	cancel()
 
 	// 2. Close the Kafka consumer — waits for the consumer goroutine to exit, then closes the client
 	if err := consumer.Close(); err != nil {

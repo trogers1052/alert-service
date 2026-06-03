@@ -17,7 +17,7 @@ import (
 	"github.com/trogers1052/alert-service/internal/config"
 	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
-	"github.com/trogers1052/alert-service/internal/telegram"
+	"github.com/trogers1052/trading-go-commons/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -75,11 +75,10 @@ func newTestService(t *testing.T) (*AlertService, *httptest.Server) {
 		json.NewEncoder(w).Encode(resp)
 	}))
 
-	tc := telegram.NewClient("test-token", 12345)
 	// Override the HTTP client to use our test server
-	tc.SetHTTPClientForTest(&http.Client{
+	tc := telegram.NewClient("test-token", 12345, telegram.WithHTTPClient(&http.Client{
 		Transport: &redirectTransport{target: server.URL},
-	})
+	}))
 
 	cfg := newTestConfig()
 	// Build the service manually to avoid starting background goroutines
@@ -981,8 +980,7 @@ func TestHandleDecisionEvent_BuySignalSendsKeyboard(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tc := telegram.NewClient("test", 42)
-	tc.SetHTTPClientForTest(&http.Client{Transport: &redirectTransport{target: server.URL}})
+	tc := telegram.NewClient("test", 42, telegram.WithHTTPClient(&http.Client{Transport: &redirectTransport{target: server.URL}}))
 
 	s := &AlertService{
 		config:           newTestConfig(),
@@ -1026,8 +1024,7 @@ func TestHandleDecisionEvent_WatchSignalNoKeyboard(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tc := telegram.NewClient("test", 42)
-	tc.SetHTTPClientForTest(&http.Client{Transport: &redirectTransport{target: server.URL}})
+	tc := telegram.NewClient("test", 42, telegram.WithHTTPClient(&http.Client{Transport: &redirectTransport{target: server.URL}}))
 
 	s := &AlertService{
 		config:           newTestConfig(),

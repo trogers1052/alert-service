@@ -13,7 +13,7 @@ import (
 	"github.com/trogers1052/alert-service/internal/config"
 	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
-	"github.com/trogers1052/alert-service/internal/telegram"
+	"github.com/trogers1052/trading-go-commons/telegram"
 )
 
 // AlertService handles alert logic and message formatting

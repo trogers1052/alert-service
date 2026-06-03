@@ -2,9 +2,9 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
+
+	"github.com/trogers1052/trading-go-commons/env"
 )
 
 // Config holds all configuration for the alert service
@@ -47,37 +47,37 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		// Kafka
-		KafkaBrokers:       strings.Split(getEnv("KAFKA_BROKERS", "localhost:19092"), ","),
-		KafkaConsumerGroup: getEnv("KAFKA_CONSUMER_GROUP", "alert-service"),
-		KafkaDecisionTopic: getEnv("KAFKA_DECISION_TOPIC", "trading.decisions"),
-		KafkaRankingTopic:  getEnv("KAFKA_RANKING_TOPIC", "trading.rankings"),
+		KafkaBrokers:       strings.Split(env.String("KAFKA_BROKERS", "localhost:19092"), ","),
+		KafkaConsumerGroup: env.String("KAFKA_CONSUMER_GROUP", "alert-service"),
+		KafkaDecisionTopic: env.String("KAFKA_DECISION_TOPIC", "trading.decisions"),
+		KafkaRankingTopic:  env.String("KAFKA_RANKING_TOPIC", "trading.rankings"),
 
 		// Telegram
-		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramChatID:   getEnvInt64("TELEGRAM_CHAT_ID", 0),
+		TelegramBotToken: env.String("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:   env.Int64("TELEGRAM_CHAT_ID", 0),
 
 		// Alert settings
-		MinConfidence:          getEnvFloat("MIN_CONFIDENCE", 0.6),
-		AlertOnBuy:             getEnvBool("ALERT_ON_BUY", true),
-		AlertOnSell:            getEnvBool("ALERT_ON_SELL", true),
-		AlertOnWatch:           getEnvBool("ALERT_ON_WATCH", false),
-		AlertOnRankings:        getEnvBool("ALERT_ON_RANKINGS", true),
-		RankingsTopN:           getEnvInt("RANKINGS_TOP_N", 5),
-		MinRRRatio:             getEnvFloat("MIN_RR_RATIO", 2.0),
-		CooldownMinutes:        getEnvInt("COOLDOWN_MINUTES", 30),
-		ScaleInCooldownMinutes: getEnvInt("SCALE_IN_COOLDOWN_MINUTES", 5),
-		RankingCooldownMinutes: getEnvInt("RANKING_COOLDOWN_MINUTES", 60),
-		QuietHoursStart:        getEnvInt("QUIET_HOURS_START", 22), // 10 PM
-		QuietHoursEnd:          getEnvInt("QUIET_HOURS_END", 7),    // 7 AM
-		EnableQuietHours:       getEnvBool("ENABLE_QUIET_HOURS", false),
-		QuietHoursTimezone:     getEnv("QUIET_HOURS_TIMEZONE", "America/New_York"),
+		MinConfidence:          env.Float("MIN_CONFIDENCE", 0.6),
+		AlertOnBuy:             env.Bool("ALERT_ON_BUY", true),
+		AlertOnSell:            env.Bool("ALERT_ON_SELL", true),
+		AlertOnWatch:           env.Bool("ALERT_ON_WATCH", false),
+		AlertOnRankings:        env.Bool("ALERT_ON_RANKINGS", true),
+		RankingsTopN:           env.Int("RANKINGS_TOP_N", 5),
+		MinRRRatio:             env.Float("MIN_RR_RATIO", 2.0),
+		CooldownMinutes:        env.Int("COOLDOWN_MINUTES", 30),
+		ScaleInCooldownMinutes: env.Int("SCALE_IN_COOLDOWN_MINUTES", 5),
+		RankingCooldownMinutes: env.Int("RANKING_COOLDOWN_MINUTES", 60),
+		QuietHoursStart:        env.Int("QUIET_HOURS_START", 22), // 10 PM
+		QuietHoursEnd:          env.Int("QUIET_HOURS_END", 7),    // 7 AM
+		EnableQuietHours:       env.Bool("ENABLE_QUIET_HOURS", false),
+		QuietHoursTimezone:     env.String("QUIET_HOURS_TIMEZONE", "America/New_York"),
 
 		// Symbol muting
-		MutedSymbols: getEnvSymbolSet("MUTED_SYMBOLS"),
+		MutedSymbols: env.StringSet("MUTED_SYMBOLS"),
 
 		// Stock-service
-		StockServiceURL:    getEnv("STOCK_SERVICE_URL", "http://stock-service:8081"),
-		StockServiceAPIKey: getEnv("STOCK_SERVICE_API_KEY", ""),
+		StockServiceURL:    env.String("STOCK_SERVICE_URL", "http://stock-service:8081"),
+		StockServiceAPIKey: env.String("STOCK_SERVICE_API_KEY", ""),
 	}
 
 	// Validate required fields
@@ -89,62 +89,4 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvInt64(key string, defaultValue int64) int64 {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvFloat(key string, defaultValue float64) float64 {
-	if value := os.Getenv(key); value != "" {
-		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
-			return floatValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvSymbolSet(key string) map[string]bool {
-	value := os.Getenv(key)
-	if value == "" {
-		return nil
-	}
-	set := make(map[string]bool)
-	for _, s := range strings.Split(value, ",") {
-		trimmed := strings.TrimSpace(s)
-		if trimmed != "" {
-			set[strings.ToUpper(trimmed)] = true
-		}
-	}
-	return set
 }
