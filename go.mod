@@ -6,7 +6,7 @@ require (
 	github.com/IBM/sarama v1.47.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	github.com/trogers1052/trading-event-schemas v0.1.0
+	github.com/trogers1052/trading-event-schemas v0.1.1
 	github.com/trogers1052/trading-go-commons v0.2.0
 	github.com/trogers1052/trading-testkit v0.3.0
 )
