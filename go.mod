@@ -3,11 +3,10 @@ module github.com/trogers1052/alert-service
 go 1.25.0
 
 require (
-	github.com/IBM/sarama v1.47.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	github.com/trogers1052/trading-event-schemas v0.1.1
-	github.com/trogers1052/trading-go-commons v0.3.0
+	github.com/trogers1052/trading-go-commons v0.4.0
 	github.com/trogers1052/trading-testkit v0.3.0
 )
 
@@ -16,6 +15,7 @@ replace github.com/trogers1052/trading-testkit => ../trading-testkit
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
+	github.com/IBM/sarama v1.47.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -72,6 +72,7 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1 // indirect
+	github.com/segmentio/kafka-go v0.4.51 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/testcontainers/testcontainers-go v0.40.0 // indirect

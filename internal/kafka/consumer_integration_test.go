@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/IBM/sarama"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 	testkit "github.com/trogers1052/trading-testkit"
 
 	"github.com/trogers1052/alert-service/internal/metrics"
@@ -23,11 +23,9 @@ func TestConsumer_EndToEnd(t *testing.T) {
 	rc.CreateTopic(t, decTopic, 1)
 	rc.CreateTopic(t, rankTopic, 1)
 
-	cfg := sarama.NewConfig()
-	cfg.Producer.Return.Successes = true
-	producer, err := sarama.NewSyncProducer([]string{rc.Brokers}, cfg)
+	producer, err := commonskafka.NewProducer([]string{rc.Brokers})
 	if err != nil {
-		t.Fatalf("NewSyncProducer: %v", err)
+		t.Fatalf("NewProducer: %v", err)
 	}
 	defer producer.Close()
 
@@ -73,10 +71,8 @@ func TestConsumer_EndToEnd(t *testing.T) {
 	// live message can land before the consumer is positioned. 6s matches the
 	// settle window the shared package's own OffsetNewest test relies on.
 	time.Sleep(6 * time.Second)
-	if _, _, err := producer.SendMessage(&sarama.ProducerMessage{
-		Topic: decTopic, Value: sarama.ByteEncoder(decRaw),
-	}); err != nil {
-		t.Fatalf("SendMessage: %v", err)
+	if err := producer.Publish(context.Background(), decTopic, nil, decRaw); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 
 	select {
@@ -89,12 +85,14 @@ func TestConsumer_EndToEnd(t *testing.T) {
 	}
 }
 
-func TestNewConsumer_BadBroker(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
-	_, err := NewConsumer([]string{"127.0.0.1:1"}, "g", decTopic, rankTopic, nil)
+func TestNewConsumer_NoBrokers(t *testing.T) {
+	// Construction must fail fast when no broker is supplied. Under kafka-go the
+	// consumer group connects lazily (no metadata round-trip at construction), so
+	// an unreachable-but-syntactically-valid broker no longer errors at
+	// NewConsumer time; the deterministic construction-error path is an empty
+	// broker list, which the shared NewConsumerGroup rejects.
+	_, err := NewConsumer(nil, "g", decTopic, rankTopic, nil)
 	if err == nil {
-		t.Fatal("expected error for unreachable broker")
+		t.Fatal("expected error when no brokers are supplied")
 	}
 }

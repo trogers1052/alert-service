@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/IBM/sarama"
 	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 
 	"github.com/trogers1052/alert-service/internal/metrics"
@@ -82,7 +81,7 @@ func NewConsumer(brokers []string, groupID, decisionTopic, rankingTopic string, 
 		c.handleMessage,
 		// Preserve the previous behaviour: a brand-new group starts at the
 		// newest offset (only fresh alerts, never a backlog replay).
-		commonskafka.WithInitialOffset(sarama.OffsetNewest),
+		commonskafka.WithInitialOffset(commonskafka.OffsetNewest),
 		// Always mark on handler error (the Handler already dead-letters and
 		// returns nil; this is the safety net for any unexpected error path).
 		commonskafka.WithOnError(commonskafka.MarkAndContinue),
