@@ -66,8 +66,13 @@ func TestConsumer_EndToEnd(t *testing.T) {
 		}
 	}()
 
-	// Offsets.Initial = Newest, so produce AFTER the consumer is consuming.
-	time.Sleep(2 * time.Second)
+	// Offsets.Initial = Newest, so produce AFTER the consumer group has joined
+	// and settled on the latest offset. Start() returns as soon as the shared
+	// ConsumerGroup runner is entered (before partition assignment), so give the
+	// group time to complete the join/rebalance before producing — otherwise the
+	// live message can land before the consumer is positioned. 6s matches the
+	// settle window the shared package's own OffsetNewest test relies on.
+	time.Sleep(6 * time.Second)
 	if _, _, err := producer.SendMessage(&sarama.ProducerMessage{
 		Topic: decTopic, Value: sarama.ByteEncoder(decRaw),
 	}); err != nil {

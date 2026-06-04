@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
+
 	"github.com/trogers1052/alert-service/internal/metrics"
 	"github.com/trogers1052/alert-service/internal/models"
 )
@@ -30,17 +32,32 @@ const (
 // MessageHandler is called when a message is received
 type MessageHandler func(ctx context.Context, event interface{}) error
 
-// Consumer wraps Sarama consumer group for Kafka consumption
+// Consumer consumes the decision and ranking topics via the shared
+// trading-go-commons consumer-group runner. It owns the alert-service-specific
+// decode/validate/retry/dead-letter discipline inside its message Handler;
+// offset commits and reconnect/rebalance/shutdown are handled by the shared
+// ConsumerGroup.
+//
+// Commit discipline (preserved from the previous hand-rolled consumer): every
+// message is ALWAYS marked. Decode/validate failures are logged and marked.
+// Decision-handler failures are retried (handlerMaxRetries) then dead-lettered
+// and marked. Ranking-handler failures are logged and marked. The Handler
+// therefore always returns nil; WithOnError(MarkAndContinue) is configured as a
+// belt-and-braces safety net so any unexpected error path still marks rather
+// than wedging the consumer in a reprocess loop.
 type Consumer struct {
-	client          sarama.ConsumerGroup
-	decisionTopic   string
-	rankingTopic    string
+	group         *commonskafka.ConsumerGroup
+	decisionTopic string
+	rankingTopic  string
+
 	decisionHandler MessageHandler
 	rankingHandler  MessageHandler
-	ready           chan bool
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
-	metrics         metrics.Recorder
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	ready  chan struct{}
+
+	metrics metrics.Recorder
 }
 
 // NewConsumer creates a new Kafka consumer.
@@ -50,23 +67,33 @@ func NewConsumer(brokers []string, groupID, decisionTopic, rankingTopic string, 
 	if m == nil {
 		m = metrics.Nop{}
 	}
-	config := sarama.NewConfig()
-	config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
-	config.Consumer.Offsets.Initial = sarama.OffsetNewest
-	config.Version = sarama.V2_8_0_0
 
-	client, err := sarama.NewConsumerGroup(brokers, groupID, config)
+	c := &Consumer{
+		decisionTopic: decisionTopic,
+		rankingTopic:  rankingTopic,
+		ready:         make(chan struct{}),
+		metrics:       m,
+	}
+
+	group, err := commonskafka.NewConsumerGroup(
+		brokers,
+		groupID,
+		[]string{decisionTopic, rankingTopic},
+		c.handleMessage,
+		// Preserve the previous behaviour: a brand-new group starts at the
+		// newest offset (only fresh alerts, never a backlog replay).
+		commonskafka.WithInitialOffset(sarama.OffsetNewest),
+		// Always mark on handler error (the Handler already dead-letters and
+		// returns nil; this is the safety net for any unexpected error path).
+		commonskafka.WithOnError(commonskafka.MarkAndContinue),
+		commonskafka.WithConsumerClientID(groupID),
+	)
 	if err != nil {
 		return nil, err
 	}
+	c.group = group
 
-	return &Consumer{
-		client:        client,
-		decisionTopic: decisionTopic,
-		rankingTopic:  rankingTopic,
-		ready:         make(chan bool),
-		metrics:       m,
-	}, nil
+	return c, nil
 }
 
 // SetDecisionHandler sets the handler for decision events
@@ -79,30 +106,19 @@ func (c *Consumer) SetRankingHandler(handler MessageHandler) {
 	c.rankingHandler = handler
 }
 
-// Start begins consuming messages from both topics
+// Start begins consuming messages from both topics. It launches the shared
+// ConsumerGroup runner in the background and returns once consumption has been
+// started, matching the non-blocking contract of the previous implementation.
 func (c *Consumer) Start(ctx context.Context) error {
 	ctx, c.cancel = context.WithCancel(ctx)
-
-	topics := []string{c.decisionTopic, c.rankingTopic}
 
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		for {
-			handler := &consumerGroupHandler{
-				consumer: c,
-				ready:    c.ready,
-			}
-
-			if err := c.client.Consume(ctx, topics, handler); err != nil {
-				log.Printf("Error from consumer: %v", err)
-			}
-
-			if ctx.Err() != nil {
-				return
-			}
-
-			c.ready = make(chan bool)
+		// The runner is consuming as soon as Run is entered; signal ready.
+		close(c.ready)
+		if err := c.group.Run(ctx); err != nil {
+			log.Printf("Error from consumer: %v", err)
 		}
 	}()
 
@@ -111,107 +127,100 @@ func (c *Consumer) Start(ctx context.Context) error {
 	return nil
 }
 
-// Close stops the consumer gracefully
+// Close stops the consumer gracefully: it cancels the run context, waits for
+// the runner goroutine to exit, then releases the underlying consumer group.
 func (c *Consumer) Close() error {
 	if c.cancel != nil {
 		c.cancel()
 	}
 	c.wg.Wait()
-	return c.client.Close()
-}
-
-// consumerGroupHandler implements sarama.ConsumerGroupHandler
-type consumerGroupHandler struct {
-	consumer *Consumer
-	ready    chan bool
-}
-
-func (h *consumerGroupHandler) Setup(sarama.ConsumerGroupSession) error {
-	close(h.ready)
+	if c.group != nil {
+		return c.group.Close()
+	}
 	return nil
 }
 
-func (h *consumerGroupHandler) Cleanup(sarama.ConsumerGroupSession) error {
+// handleMessage is the shared-ConsumerGroup Handler. It dispatches by topic into
+// the decision/ranking processing, preserving the exact decode/validate/retry/
+// dead-letter/commit semantics of the previous hand-rolled ConsumeClaim. It
+// always returns nil so every message is marked (committed), matching the prior
+// "always MarkMessage" fall-through behaviour.
+func (c *Consumer) handleMessage(ctx context.Context, msg *commonskafka.Message) error {
+	c.metrics.IncKafkaConsumed(msg.Topic)
+
+	switch msg.Topic {
+	case c.decisionTopic:
+		c.handleDecision(ctx, msg)
+	case c.rankingTopic:
+		c.handleRanking(ctx, msg)
+	}
+
+	// Always mark — return nil regardless of downstream handler outcome.
 	return nil
 }
 
-func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	for {
-		select {
-		case message, ok := <-claim.Messages():
-			if !ok {
-				return nil
-			}
+// handleDecision decodes, validates, and dispatches a decision event, retrying
+// transient handler failures and dead-lettering on permanent failure.
+func (c *Consumer) handleDecision(ctx context.Context, msg *commonskafka.Message) {
+	if c.decisionHandler == nil {
+		return
+	}
 
-			ctx := session.Context()
-			h.consumer.metrics.IncKafkaConsumed(message.Topic)
+	var event models.DecisionEvent
+	if err := json.Unmarshal(msg.Value, &event); err != nil {
+		log.Printf("WARNING: Failed to unmarshal decision event (offset %d): %v", msg.Offset, err)
+		return
+	}
 
-			// Determine message type based on topic
-			switch message.Topic {
-			case h.consumer.decisionTopic:
-				if h.consumer.decisionHandler != nil {
-					var event models.DecisionEvent
-					if err := json.Unmarshal(message.Value, &event); err != nil {
-						log.Printf("WARNING: Failed to unmarshal decision event (offset %d): %v", message.Offset, err)
-						session.MarkMessage(message, "")
-						continue
-					}
+	if err := event.Validate(); err != nil {
+		log.Printf("WARNING: Rejecting malformed decision event (offset %d): %v", msg.Offset, err)
+		return
+	}
 
-					if err := event.Validate(); err != nil {
-						log.Printf("WARNING: Rejecting malformed decision event (offset %d): %v", message.Offset, err)
-						session.MarkMessage(message, "")
-						continue
-					}
+	log.Printf("Received decision: %s %s (confidence=%.2f, offset=%d)",
+		event.Data.Symbol, event.Data.Signal, event.Data.Confidence, msg.Offset)
 
-					log.Printf("Received decision: %s %s (confidence=%.2f, offset=%d)",
-						event.Data.Symbol, event.Data.Signal, event.Data.Confidence, message.Offset)
-
-					// Retry handler failures — trading alerts are high-value
-					// and transient Telegram errors should not silently drop them.
-					var handlerErr error
-					for attempt := 1; attempt <= handlerMaxRetries; attempt++ {
-						handlerErr = h.consumer.decisionHandler(ctx, &event)
-						if handlerErr == nil {
-							break
-						}
-						if attempt < handlerMaxRetries {
-							log.Printf("Decision handler attempt %d/%d failed for %s: %v — retrying in %s",
-								attempt, handlerMaxRetries, event.Data.Symbol, handlerErr, handlerRetryDelay)
-							time.Sleep(handlerRetryDelay)
-						}
-					}
-					if handlerErr != nil {
-						log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — writing to dead letter file",
-							handlerMaxRetries, event.Data.Symbol, message.Offset, handlerErr)
-						writeDeadLetter(message.Value, event.Data.Symbol, message.Offset, handlerErr)
-						h.consumer.metrics.IncDeadLetters()
-					}
-				}
-
-			case h.consumer.rankingTopic:
-				if h.consumer.rankingHandler != nil {
-					var event models.RankingEvent
-					if err := json.Unmarshal(message.Value, &event); err != nil {
-						log.Printf("Failed to unmarshal ranking event: %v", err)
-						session.MarkMessage(message, "")
-						continue
-					}
-
-					log.Printf("Received ranking: %s (%d symbols, offset=%d)",
-						event.Data.SignalType, len(event.Data.Rankings), message.Offset)
-
-					if err := h.consumer.rankingHandler(ctx, &event); err != nil {
-						log.Printf("Failed to handle ranking event: %v", err)
-						// Rankings are lower priority — log and move on
-					}
-				}
-			}
-
-			session.MarkMessage(message, "")
-
-		case <-session.Context().Done():
-			return nil
+	// Retry handler failures — trading alerts are high-value and transient
+	// Telegram errors should not silently drop them.
+	var handlerErr error
+	for attempt := 1; attempt <= handlerMaxRetries; attempt++ {
+		handlerErr = c.decisionHandler(ctx, &event)
+		if handlerErr == nil {
+			break
 		}
+		if attempt < handlerMaxRetries {
+			log.Printf("Decision handler attempt %d/%d failed for %s: %v — retrying in %s",
+				attempt, handlerMaxRetries, event.Data.Symbol, handlerErr, handlerRetryDelay)
+			time.Sleep(handlerRetryDelay)
+		}
+	}
+	if handlerErr != nil {
+		log.Printf("CRITICAL: Decision handler FAILED after %d attempts for %s (offset %d): %v — writing to dead letter file",
+			handlerMaxRetries, event.Data.Symbol, msg.Offset, handlerErr)
+		writeDeadLetter(msg.Value, event.Data.Symbol, msg.Offset, handlerErr)
+		c.metrics.IncDeadLetters()
+	}
+}
+
+// handleRanking decodes and dispatches a ranking event. Rankings are lower
+// priority: decode and handler errors are logged and the message is committed.
+func (c *Consumer) handleRanking(ctx context.Context, msg *commonskafka.Message) {
+	if c.rankingHandler == nil {
+		return
+	}
+
+	var event models.RankingEvent
+	if err := json.Unmarshal(msg.Value, &event); err != nil {
+		log.Printf("Failed to unmarshal ranking event: %v", err)
+		return
+	}
+
+	log.Printf("Received ranking: %s (%d symbols, offset=%d)",
+		event.Data.SignalType, len(event.Data.Rankings), msg.Offset)
+
+	if err := c.rankingHandler(ctx, &event); err != nil {
+		log.Printf("Failed to handle ranking event: %v", err)
+		// Rankings are lower priority — log and move on
 	}
 }
 
