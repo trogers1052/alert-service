@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -686,6 +687,73 @@ func TestFormatDecisionMessage_ChecklistBlocked(t *testing.T) {
 
 	msg := s.formatDecisionMessage(event)
 	assert.Contains(t, msg, "BLOCKED")
+}
+
+func TestFormatDecisionMessage_BlockedBanner(t *testing.T) {
+	s, srv := newTestService(t)
+	defer srv.Close()
+
+	event := makeDecisionEvent("AAPL", models.SignalBuy, 0.85)
+	event.Data.Checklist = &models.Checklist{
+		Status:       "BLOCKED",
+		BlockReasons: []string{"no stop plan", "earnings in 3d"},
+	}
+	msg := s.formatDecisionMessage(event)
+	assert.Contains(t, msg, "DO NOT TRADE")
+	assert.Contains(t, msg, "no stop plan")
+	assert.Contains(t, msg, "earnings in 3d")
+}
+
+// newRecordingService returns a service whose Telegram sends are counted.
+func newRecordingService(t *testing.T, count *int32) (*AlertService, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(count, 1)
+		_ = json.NewEncoder(w).Encode(telegram.SendMessageResponse{
+			OK: true, Result: &telegram.MessageResult{MessageID: 1},
+		})
+	}))
+	tc := telegram.NewClient("test-token", 12345, telegram.WithHTTPClient(&http.Client{
+		Transport: &redirectTransport{target: server.URL},
+	}))
+	s := &AlertService{
+		config:           newTestConfig(),
+		telegramClient:   tc,
+		cooldowns:        make(map[string]time.Time),
+		rankingCooldowns: make(map[string]time.Time),
+		feedbackLog:      make(map[string]models.FeedbackEntry),
+		metrics:          metrics.Nop{},
+		stopCleanup:      make(chan struct{}),
+		stopFeedback:     make(chan struct{}),
+	}
+	return s, server
+}
+
+func TestHandleDecisionEvent_BlockedBuySentDespiteLowConfidence(t *testing.T) {
+	var count int32
+	s, srv := newRecordingService(t, &count)
+	defer srv.Close()
+
+	// Confidence 0.1 is below the threshold — an actionable BUY would be dropped,
+	// but a BLOCKED one must still surface (non-actionable, but shown).
+	event := makeDecisionEvent("AAPL", models.SignalBuy, 0.1)
+	event.Data.Checklist = &models.Checklist{Status: "BLOCKED", BlockReasons: []string{"no stop plan"}}
+
+	require.NoError(t, s.HandleDecisionEvent(context.Background(), event))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&count), "blocked BUY should be sent despite low confidence")
+	assert.Empty(t, s.feedbackLog, "blocked BUY must not create trade-feedback tracking")
+}
+
+func TestHandleDecisionEvent_ActionableLowConfidenceStillDropped(t *testing.T) {
+	var count int32
+	s, srv := newRecordingService(t, &count)
+	defer srv.Close()
+
+	// A non-blocked BUY below the confidence threshold is still dropped —
+	// the blocked bypass must not weaken the normal gate.
+	event := makeDecisionEvent("AAPL", models.SignalBuy, 0.1)
+	require.NoError(t, s.HandleDecisionEvent(context.Background(), event))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&count), "low-confidence actionable BUY should be dropped")
 }
 
 func TestFormatDecisionMessage_TradePlanWithWarnings(t *testing.T) {
