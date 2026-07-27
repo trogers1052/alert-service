@@ -142,22 +142,27 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		return nil
 	}
 
-	// Check minimum confidence threshold
-	if data.Confidence < s.config.MinConfidence {
-		log.Printf("Skipping alert for %s: confidence %.2f below threshold %.2f",
-			data.Symbol, data.Confidence, s.config.MinConfidence)
-		return nil
-	}
+	// A BLOCKED checklist means a hard pre-trade gate failed (no stop plan,
+	// earnings imminent, risk too high, wrong regime). It is NON-ACTIONABLE, but
+	// we still surface it — clearly marked — so the trader sees the setup and why
+	// it was filtered. Blocked signals therefore bypass the actionable quality
+	// gates below (confidence / R:R), but still honor cooldown and quiet hours.
+	isBlocked := data.Checklist != nil && data.Checklist.Status == "BLOCKED"
 
-	// Check minimum R:R ratio for BUY signals
-	if data.Signal == models.SignalBuy && s.config.MinRRRatio > 0 {
-		if data.TradePlan != nil && data.TradePlan.RiskRewardRatio < s.config.MinRRRatio {
-			log.Printf("Skipping alert for %s: R:R %.1f:1 below minimum %.1f:1",
-				data.Symbol, data.TradePlan.RiskRewardRatio, s.config.MinRRRatio)
+	if !isBlocked {
+		// Check minimum confidence threshold
+		if data.Confidence < s.config.MinConfidence {
+			log.Printf("Skipping alert for %s: confidence %.2f below threshold %.2f",
+				data.Symbol, data.Confidence, s.config.MinConfidence)
 			return nil
 		}
-		if data.Checklist != nil && data.Checklist.Status == "BLOCKED" {
-			log.Printf("Skipping alert for %s: checklist status BLOCKED", data.Symbol)
+
+		// Check minimum R:R ratio for BUY signals (defense-in-depth; decision-engine
+		// already suppresses invalid-R:R BUYs upstream).
+		if data.Signal == models.SignalBuy && s.config.MinRRRatio > 0 &&
+			data.TradePlan != nil && data.TradePlan.RiskRewardRatio < s.config.MinRRRatio {
+			log.Printf("Skipping alert for %s: R:R %.1f:1 below minimum %.1f:1",
+				data.Symbol, data.TradePlan.RiskRewardRatio, s.config.MinRRRatio)
 			return nil
 		}
 	}
@@ -190,10 +195,11 @@ func (s *AlertService) HandleDecisionEvent(ctx context.Context, event interface{
 		return nil
 	}
 
-	// Format and send the message with feedback buttons for BUY/SELL signals
+	// Format and send the message with feedback buttons for BUY/SELL signals.
+	// Blocked signals are non-actionable, so they get no "Traded" button / feedback row.
 	message := s.formatDecisionMessage(decision)
 
-	if data.Signal == models.SignalBuy || data.Signal == models.SignalSell {
+	if (data.Signal == models.SignalBuy || data.Signal == models.SignalSell) && !isBlocked {
 		ts := time.Now().Format("150405") // compact timestamp for callback data
 		feedbackKey := fmt.Sprintf("%s:%s:%s", data.Symbol, data.Signal, ts)
 
@@ -471,6 +477,16 @@ func (s *AlertService) formatDecisionMessage(event *models.DecisionEvent) string
 	var sb strings.Builder
 
 	sym := html.EscapeString(data.Symbol)
+
+	// Blocked signals lead with an unmistakable non-actionable banner so a 🟢 BUY
+	// header can never be mistaken for a tradeable signal.
+	if data.Checklist != nil && data.Checklist.Status == "BLOCKED" {
+		sb.WriteString("🚫 <b>BLOCKED — DO NOT TRADE</b>\n")
+		if len(data.Checklist.BlockReasons) > 0 {
+			sb.WriteString(fmt.Sprintf("Reason: %s\n", html.EscapeString(strings.Join(data.Checklist.BlockReasons, "; "))))
+		}
+		sb.WriteString("<i>Shown so you can see the setup the gate filtered.</i>\n➖➖➖➖➖\n")
+	}
 
 	// Tier badge (e.g. " 🟢 [A-tier]")
 	tierBadge := formatTierBadge(data.TierData)

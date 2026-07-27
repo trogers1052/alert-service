@@ -99,19 +99,20 @@ func (e *DecisionEvent) Validate() error {
 
 // Checklist holds the pre-trade checklist evaluation result
 type Checklist struct {
-	StopLossDefined        bool    `json:"stop_loss_defined"`
-	PositionSizedCorrectly bool    `json:"position_sized_correctly"`
-	RRRatioAcceptable      bool    `json:"rr_ratio_acceptable"`
-	NoEarningsImminent     bool    `json:"no_earnings_imminent"`
-	RegimeCompatible       bool    `json:"regime_compatible"`
-	AllChecksPassed        bool    `json:"all_checks_passed"`
-	Status                 string  `json:"status"` // "GO" | "REVIEW" | "BLOCKED"
-	EarningsDate           *string `json:"earnings_date,omitempty"`
-	EarningsDaysAway       *int    `json:"earnings_days_away,omitempty"`
-	EarningsVerified       *bool   `json:"earnings_verified,omitempty"`
-	RegimeID               string  `json:"regime_id"`
-	RiskPct                float64 `json:"risk_pct"`
-	RRRatio                float64 `json:"rr_ratio"`
+	StopLossDefined        bool     `json:"stop_loss_defined"`
+	PositionSizedCorrectly bool     `json:"position_sized_correctly"`
+	RRRatioAcceptable      bool     `json:"rr_ratio_acceptable"`
+	NoEarningsImminent     bool     `json:"no_earnings_imminent"`
+	RegimeCompatible       bool     `json:"regime_compatible"`
+	AllChecksPassed        bool     `json:"all_checks_passed"`
+	Status                 string   `json:"status"` // "GO" | "REVIEW" | "BLOCKED"
+	BlockReasons           []string `json:"block_reasons,omitempty"`
+	EarningsDate           *string  `json:"earnings_date,omitempty"`
+	EarningsDaysAway       *int     `json:"earnings_days_away,omitempty"`
+	EarningsVerified       *bool    `json:"earnings_verified,omitempty"`
+	RegimeID               string   `json:"regime_id"`
+	RiskPct                float64  `json:"risk_pct"`
+	RRRatio                float64  `json:"rr_ratio"`
 }
 
 // TradePlan contains entry/stop/target details for a trade
